@@ -1,0 +1,6 @@
+pandas
+opencv-python
+pytesseract
+llama-cpp-python
+pdf2image
+pillow
