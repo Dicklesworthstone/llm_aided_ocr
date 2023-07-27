@@ -12,7 +12,7 @@ from llama_cpp import Llama
 # python3 -m pip install wheel
 # pip install -r requirements.txt
 
-llm = Llama(model_path="./Llama-2-7B-GGML/llama-2-7b.ggmlv3.q4_0.bin", n_ctx=2048)
+llm = Llama(model_path="./Llama-2-13B-chat-GGML/llama-2-13b-chat.ggmlv3.q4_0.bin", n_ctx=2048)
 
 print(f"Tesseract version: {pytesseract.get_tesseract_version()}")
 
