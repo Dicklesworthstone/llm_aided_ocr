@@ -4,4 +4,3 @@ pytesseract
 llama-cpp-python
 pdf2image
 pillow
-tqdm
