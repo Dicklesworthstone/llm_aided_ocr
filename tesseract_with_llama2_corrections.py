@@ -92,7 +92,7 @@ if __name__ == '__main__':
 
     print(f"Extracting text from converted pages...")
     with Pool() as p:
-        list_of_extracted_text_strings = list(p.map(ocr_image, list_of_scanned_images), total=len(list_of_scanned_images))
+        list_of_extracted_text_strings = p.map(ocr_image, list_of_scanned_images)
     print(f"Done extracting text from converted pages. \n")
 
     raw_ocr_output = "\n".join(list_of_extracted_text_strings)
