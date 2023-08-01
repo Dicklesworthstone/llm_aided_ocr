@@ -2,7 +2,6 @@ from pdf2image import convert_from_path
 import pytesseract
 from llama_cpp import Llama
 from multiprocessing import Pool
-from tqdm import tqdm
 import os
 
 # sudo apt-get install -y tesseract-ocr libtesseract-dev poppler-utils
@@ -10,11 +9,13 @@ import os
 # git clone https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML
 
 
-
 def convert_pdf_to_images_func(input_pdf_file_path, max_test_pages):
-    print(f"Now converting first {max_test_pages} pages of PDF file {input_pdf_file_path} to images...")
-    # Use first_page and last_page to limit the pages that get converted
-    list_of_scanned_images = convert_from_path(input_pdf_file_path, first_page=1, last_page=max_test_pages)
+    if max_test_pages == 0:
+        print(f"Now converting all pages of PDF file {input_pdf_file_path} to images...")
+        list_of_scanned_images = convert_from_path(input_pdf_file_path, first_page=1)
+    else:
+        print(f"Now converting first {max_test_pages} pages of PDF file {input_pdf_file_path} to images...")
+        list_of_scanned_images = convert_from_path(input_pdf_file_path, first_page=1, last_page=max_test_pages)
     print(f"Done converting pages from PDF file {input_pdf_file_path} to images.")
     return list_of_scanned_images
 
@@ -66,12 +67,12 @@ def ocr_image(image):
 
 if __name__ == '__main__':
     input_pdf_file_path = '160301289-Warren-Buffett-Katharine-Graham-Letter.pdf'
-    max_test_pages = 3
-    skip_first_n_pages = 0
-    reformat_as_markdown = False
-    check_if_valid_english = False
+    max_test_pages = 0 # set to 0 to convert all pages of the PDF file using Tesseract
+    skip_first_n_pages = 0 # set to 0 to process all pages with the LLM
+    check_if_valid_english = False # set to True to check if the extracted text is valid English
+    reformat_as_markdown = True # set to True to reformat the corrected extracted text using markdown formatting
+    
     list_of_scanned_images = convert_pdf_to_images_func(input_pdf_file_path, max_test_pages)
-
     model_file_path = "./Llama-2-13B-chat-GGML/llama-2-13b-chat.ggmlv3.q4_0.bin"
     print(f"Loading Llama model from {model_file_path}...")
     llm = Llama(model_path=model_file_path, n_ctx=2048)
@@ -79,7 +80,8 @@ if __name__ == '__main__':
 
     print(f"Extracting text from converted pages...")
     with Pool() as p:
-        list_of_extracted_text_strings = list(tqdm(p.map(ocr_image, list_of_scanned_images), total=len(list_of_scanned_images)))
+        list_of_extracted_text_strings = list(p.map(ocr_image, list_of_scanned_images), total=len(list_of_scanned_images))
+    print(f"Done extracting text from converted pages. \n")
 
     # process the OCR output
     list_of_corrected_text_strings = []
@@ -88,10 +90,12 @@ if __name__ == '__main__':
             continue
         extracted_text_string = check_extracted_pages_func(text)
         if extracted_text_string:
-            print(f"\nText from page {ii + 1}:")
+            print(f"Processing page {ii + 1} with LLM...")
             corrected_extracted_text_string = process_text_with_llm_func(extracted_text_string, check_if_valid_english, reformat_as_markdown)
+            print(f"Corrected text from page {ii + 1}:")
+            print(corrected_extracted_text_string)
+            print('_'*80)
             list_of_corrected_text_strings.append(corrected_extracted_text_string)
-            print(text)
 
     # join the list of strings into a single string with a newline after each page
     final_text = "\n".join(list_of_corrected_text_strings)
