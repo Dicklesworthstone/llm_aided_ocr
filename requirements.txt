@@ -4,3 +4,5 @@ pytesseract
 llama-cpp-python
 pdf2image
 pillow
+fuzzywuzzy
+python-Levenshtein
