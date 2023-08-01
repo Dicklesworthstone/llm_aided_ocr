@@ -1,6 +1,7 @@
 from pdf2image import convert_from_path
 import pytesseract
 from llama_cpp import Llama
+from fuzzywuzzy import fuzz
 from multiprocessing import Pool
 import os
 
@@ -61,6 +62,17 @@ def process_text_with_llm_func(extracted_text_string, check_if_valid_english=Fal
         corrected_extracted_text_string = llm_output_3["choices"][0]["text"].replace(prompt_test_3, "")
     return corrected_extracted_text_string
 
+def filter_hallucinations(corrected_text, raw_text, threshold=90):
+    corrected_sentences = corrected_text.split('. ')
+    raw_sentences = raw_text.split('. ')
+    filtered_sentences = []
+    for corrected_sentence in corrected_sentences:
+        matches = [fuzz.ratio(corrected_sentence, raw_sentence) for raw_sentence in raw_sentences]
+        best_match = max(matches) if matches else 0
+        if best_match >= threshold:
+            filtered_sentences.append(corrected_sentence)
+    return '. '.join(filtered_sentences)
+
 def ocr_image(image):
     return pytesseract.image_to_string(image)
     
@@ -82,6 +94,12 @@ if __name__ == '__main__':
     with Pool() as p:
         list_of_extracted_text_strings = list(p.map(ocr_image, list_of_scanned_images), total=len(list_of_scanned_images))
     print(f"Done extracting text from converted pages. \n")
+
+    raw_ocr_output = "\n".join(list_of_extracted_text_strings)
+    base_name = os.path.splitext(input_pdf_file_path)[0]
+    raw_ocr_output_file_path = f"{base_name}__raw_ocr_output.txt"
+    with open(raw_ocr_output_file_path, "w") as f:
+        f.write(raw_ocr_output)
 
     # process the OCR output
     list_of_corrected_text_strings = []
@@ -111,4 +129,17 @@ if __name__ == '__main__':
     with open(output_file_path, 'w') as f:
         f.write(final_text)
 
-    print(f"Final text written to: {output_file_path}")
+    print(f"LLM corrected text written to: {output_file_path}")
+    
+    print('Now filtering out hallucinations from corrected text...')
+    # filter out hallucinations from the corrected output
+    filtered_output = filter_hallucinations(final_text, raw_ocr_output)
+    print('Done filtering out hallucinations.')
+    
+    final_output_file_path = base_name + '_filtered' + output_extension
+    with open(final_output_file_path, 'w') as f:
+        f.write(filtered_output)
+        
+    print(f"Filtered text written to: {final_output_file_path}")
+    print(f"Done processing {input_pdf_file_path}. See output files: Raw OCR: {raw_ocr_output_file_path} \n LLM Corrected: {output_file_path} \n LLM Corrected with Hallucinations Filtered: {final_output_file_path}\n")
+    
