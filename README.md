@@ -51,5 +51,36 @@ Here are some of the important functions and what they do:
 - `filter_hallucinations`: Filters out hallucinations from the corrected text.
 - `ocr_image`: Performs OCR on the given image.
 
-## Note
-This project uses cosine similarity between sentence embeddings to filter out potential hallucinations from the LLM corrected text. This is a simple heuristic and may not be perfect. You may need to adjust the threshold for cosine similarity or use a different method depending on your needs.
+## Hallucination Filtering
+
+The process of filtering out hallucinations is pretty intricate. Here is a detailed breakdown of how it works:
+
+The primary function for this process is `filter_hallucinations`, which takes as arguments the text corrected by the LLM (`corrected_text`), the original text extracted by OCR (`raw_text`), a starting threshold (`threshold`) for filtering, the path to the PDF file (`pdf_file_path`), and the path to the SQLite database (`db_path`) where embeddings are stored for reuse.
+
+The function begins by defining a `threshold_increment` of 0.02. This is the amount by which the threshold for filtering out hallucinations is incremented in each iteration.
+
+If `db_path` and `pdf_file_path` are provided, the function first checks if an SQLite database file exists at the `db_path`. If it does not, the function creates one. It then computes a SHA3-256 hash of the PDF file to uniquely identify it. This hash is used as a key to store and retrieve embeddings from the database.
+
+The function connects to the SQLite database and creates a table named 'embeddings' if it does not already exist. This table has three columns: 'file_hash', 'original_embeddings', and 'corrected_embeddings'. The function then tries to fetch the embeddings corresponding to the file hash from the database. If it does not find them, it sets `original_embeddings` and `corrected_embeddings` to `None`. 
+
+Next, the function creates a `LlamaCppEmbeddings` object, which is used to compute embeddings for the sentences. It then splits the `raw_text` and `corrected_text` into sentences. 
+
+If `original_embeddings` is `None`, the function calculates the embeddings for the original sentences and stores them in a dictionary where the keys are the sentences and the values are the embeddings. It does the same for `corrected_embeddings`.
+
+Once it has the embeddings, the function saves them to the database using the PDF file's hash as the key. 
+
+The function then enters a loop where it filters out sentences from the corrected text based on the cosine similarity of their embeddings to the original sentences. It starts with the initial `threshold` and in each iteration, it increments the threshold by `threshold_increment`. 
+
+In each iteration, the function first initializes an empty list `filtered_sentences`. It then goes through each sentence in the corrected text. For each sentence, it gets its embedding from `corrected_embeddings` and calculates its cosine similarity with the embeddings of the original sentences. If the maximum similarity is greater than or equal to the current threshold, the sentence is added to `filtered_sentences`. 
+
+The function then joins the `filtered_sentences` into a string `filtered_corrected_text`. If the length of this text is less than the length of the original text minus 30 (an arbitrary value to allow for some difference), the function breaks the loop. If not, it increments the threshold and continues to the next iteration.
+
+Finally, the function returns the `filtered_corrected_text`, `original_embeddings`, and `corrected_embeddings`.
+
+There are two additional helper functions used in this process:
+
+- `calculate_sentence_embedding`: This function takes as arguments a `LlamaCppEmbeddings` object and a text string. It attempts to calculate the embedding of the text. If it encounters an exception that the text has too many tokens, it trims the text by 5% and tries again until it succeeds.
+
+- `calculate_similarity`: This function takes a tuple of two embeddings as argument and returns their cosine similarity.
+
+This mechanism of filtering hallucinations is a heuristic approach and it might not be perfect. The `threshold` and `threshold_increment` values might need to be tuned according to the specific requirements of the use case.
