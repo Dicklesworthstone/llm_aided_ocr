@@ -1,12 +1,12 @@
 # Use Llama2 to Improve the Accuracy of Tesseract OCR:
 
-This project focuses on improving the quality of Optical Character Recognition (OCR) outputs using Large Language Models (LLMs). 
+This project aims to improve the quality of Optical Character Recognition (OCR) outputs using Large Language Models (LLMs). 
 
 ## Purpose
-The purpose of the project is to convert scanned PDFs into readable text files by leveraging OCR and then enhance the quality of the OCR output by correcting errors and formatting the text for readability using an LLM. 
+The purpose of the project is to convert scanned PDFs into readable text files. It does this by first leveraging OCR and then enhancing the quality of the OCR output by using an LLM to correct errors and format the text for readability. 
 
 ## Example Output
-If you just want to preview the output, you can look at the [source PDF](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter.pdf) and the [raw output of the Tesseract OCR process](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt), and compare this to the [final markdown output after filtering out hallucinations](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter_filtered.md).
+If you just want to preview the output, you can look at the [source PDF](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter.pdf) and the [raw output of the Tesseract OCR process](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt), and compare this to the [final markdown output after filtering out hallucinations](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter_filtered.md) (and also the [initial output from the LLM corrections](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter.md) to see just how much the LLM hallucinates-- it's a often a lot!).
 
 ## Set up instructions:
 
@@ -23,7 +23,7 @@ pip install -r requirements.txt
 ```
 
 ## How It Works
-The project starts by converting a given PDF into images using `pdf2image` library. Then, it applies OCR to each image using `pytesseract`; to speed up processing, this is done in parallel using the multiprocessing library. The OCR'ed text is then passed through the Llama2 13B Chat model, which helps to correct OCR errors and improve the formatting of the text. It also provides an option to check if the OCR output is valid English and to reformat the text using markdown. The final text is then written to an output file. Additionally, the project includes a function to filter out potential hallucinations from the LLM corrected text, using fuzzy string matching with the original OCR text. 
+The project begins by converting a given PDF into images using the `pdf2image` library. It then applies OCR to each image using `pytesseract`, with parallel processing enabled via the multiprocessing library for speed. The OCR'ed text is subsequently passed through the Llama2 13B Chat model, which aids in correcting OCR errors and enhancing the formatting of the text. The program offers options to verify if the OCR output is valid English and to reformat the text using markdown. The final text is written to an output file. Furthermore, the project has a function to filter potential hallucinations from the LLM corrected text using sentence embeddings and cosine similarity to compare with the original OCR text. 
 
 ## Usage
 1. Set the `input_pdf_file_path` variable to the path of the PDF file you want to process.
@@ -41,13 +41,15 @@ The program will create 3 output files:
 ## Functions
 Here are some of the important functions and what they do:
 
-- `convert_pdf_to_images_func`: Converts PDF to images.
+- `convert_pdf_to_images_func`: Converts a PDF to images.
 - `check_extracted_pages_func`: Checks if the extracted text is long enough to be a page.
-- `remove_intro`: Removes the intro from the LLM output text.
+- `remove_intro`: Removes the introduction from the LLM output text.
 - `is_valid_english`: Checks if the given text is valid English.
 - `process_text_with_llm_func`: Processes the text with the LLM.
+- `calculate_sentence_embedding`: Computes the sentence embedding for a given text.
+- `calculate_similarity`: Computes the cosine similarity between the embeddings of the corrected and original sentences.
 - `filter_hallucinations`: Filters out hallucinations from the corrected text.
 - `ocr_image`: Performs OCR on the given image.
 
 ## Note
-This project uses the fuzzy string matching to filter out potential hallucinations from the LLM corrected text. This is a simple heuristic and may not be perfect. You may need to adjust the threshold for fuzzy matching or use a different method depending on your needs.
+This project uses cosine similarity between sentence embeddings to filter out potential hallucinations from the LLM corrected text. This is a simple heuristic and may not be perfect. You may need to adjust the threshold for cosine similarity or use a different method depending on your needs.
