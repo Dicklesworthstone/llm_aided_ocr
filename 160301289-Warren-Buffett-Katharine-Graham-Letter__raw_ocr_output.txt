@@ -1,0 +1,258 @@
+PENSIONS
+
+There are two aspects of the pension cost problem upon which manage-
+ment can have a significant impact: (1) maintaining rational control
+over pension plan promises to employees and (2) increasing investment
+returns on pension plan assets.
+
+The Irreversible Nature of Pension Promises
+
+To control promises rationally, it is necessary to understand the
+basic arithmetic and practical rules governing pension plans.
+
+The first thing to recognize, with every pension benefit decision, is
+that you almost certainly are playing for keeps and won't be able to
+reverse your decision subsequently if it produces subnormal profitability.
+
+As a practical matter, it is next to impossible to decrease pension
+benefits in a large profitable company ~ or even a large marginal one.
+The plan may embody language unequivocally declaring the company's right
+to terminate at any time and providing that contributions shall be
+solely at the option of the company. But the law has eroded much of
+the significance such "out" clauses were presumed to have, and operat-
+ing practicalities render any residual rights to terminate moot.
+
+So, rule number one regarding pension costs has to be to know what you
+are getting into before signing up. Look before you leap. There prob-
+ably is more managerial ignorance on pension costs than any other cost
+item of remotely similar magnitude. And, as will becone so expensively
+clear to citizens in future decades, there has been even greater
+electorate ignorance of governmental pension costs. Actuarial thinking
+simply is not intuitive to most minds. The lexicon is arcane, the
+numbers seem unreal, and making promises never quite triggers the
+visceral response evoked by writing a check.
+
+In no other managerial area can such huge aggregate Liabilities - which
+will be reflected in progressively increasing annual costs and cash
+requirements - be created so quickly and with so little immediate fi-
+nancial pain. Like pressroom Labor practices, small errors will com-
+pound. Care and caution are in order.
+
+Deceptive Arithmetic of "Promise Now - Pay Later"
+
+If you promise to pay me $500 per month for life, you have just ex-
+pended - actuarially but, nevertheless, in a totally tangible sense -
+about $65,000. If you are financially good for such a lifetime promise,
+you would be better off (if I have an average expectancy regarding longev-
+ity for one my age) handing me a check for $50,000. But it wouldn't
+
+feel the same.
+
+tn, een erent haere
+
+-2-
+
+And, if you promise to pay me 1,000 hamburgers a month for life which,
+superficially, may sound equivalent to the previous proposition
+(assuming a present hamburger price of 50¢), you have created an obli-
+gation which, in an inflationary world, becomes most difficult to
+
+evaluate. This creates a risk we talk of Later as an "earthquake risk".
+
+One thing is certain. You won't find an insurance company willing to
+take the 1,000-hamburgers-a-month obligation off your hands for
+$65,000 - or even $130,000. While hamburgers equate to 50¢ now, the
+promise to pay hamburgers in the future does not equate to the promise
+to pay fifty-cent pieces in the future.
+
+So, before plans are introduced or amended, the financial consequences
+(particularly in a world of significant inflation which I believe to
+be close to a certainty)* should be clearly understood by you. Con-
+sulting actuaries are very good at making calculations. They are
+frequently terrible at making the assumptions upon which the calcula-
+tions are based. In fact, they well may be peculiarly ill-equipped
+
+to make the most important assumptions if the world is one of economic
+discontinuities. They are trained to be conventional. Their self-
+interest in obtaining and retaining business would be ill-served if
+they were to become more than mildly unconventional. And being con-
+ventional on the crucial assumptions basically means accepting histor-
+ical experience adjusted by a moderate nudge from current events.
+
+This works fine in forecasting such factors as mortality and morbidity,
+works reasonably well on items such as employee turnover, and can be
+
+a disaster in estimating: the two most important elements of the
+pension cost equation, which are fund earnings and salary escalation.
+
+Illustrated Elemental Actuarial Principles
+
+To illustrate a few actuarial principles worth understanding, but
+without employing the technical jargon and the asterisks, let's use
+the example of your household. Assume that you, personally, make
+irrevocable promises to pay pensions of $300 per month for Life after
+they reach 65 to, say, four household employees. To make it easy,
+let's say that they each are 55 years of age at present. If you make
+that promise today, you have reduced your net worth today by about
+
+* , My views regarding inflationary possibilities are more extreme
+than those of most respected observers. It is difficult to substan-
+tiate a dogmatic view, since conclusions rest more upon social and
+political judgments than upon economic training and analysis. You
+should recognize the subjective nature of the reasoning leading to
+my pessimistic conclusions regarding inflation over the longer
+
+term - and not be reluctant to correct accordingly.
+
+
+$70,000. (For simplicity's sake, I am ignoring some variables such
+as sex of employees - women live longer and therefore cost more -
+death before 65, ete. In calculating such factors the actuaries
+shine.)
+
+Why are you immediately $70,000 poorer? Well, if you set aside a
+$70,000 fund now and invest it at 7% interest - and let all such int-
+erest remain in the fund to be compounded - the principal value of
+the fund will grow to about $140,000 in ten years when your employees
+reach 65. And to buy them a lifetime annuity of $3,600 per year will
+then cost about $35,000 each, utilizing the entire accumulated cap-
+ital of the fund. So if you make the promise and it is binding -
+legally or morally - figure you have spent today $70,000, even though
+you don't have to pay out a dime of cash for ten years.
+
+Now take it one step further and assume that your employees each are
+earning $600 per month but, instead of promising them $300 per month
+upon retirement, you promise them 50% of their salary at the time
+they retire. If their increases run 7.2% per year - and they prob-
+ably will in the world I foresee - they will be earning $1,200 per
+month by the time they reach 65. And it will now cost you $70,000
+each to purchase annuities for them to fulfill your promise. The
+actual cost, today, of modifying your promise from 50% of present pay
+to 50% of terminal pay was to exactly double the fund that needed to
+be set aside now from $70,000 to $140,000.
+
+Many pension plans use final average pay (usually the average of the
+last five years, or the highest consecutive five years in the last
+
+ten years employed) and some use career average pay. I am not arguing
+here which should be used, but am illustrating the dramatic difference
+in costs that can occur because of rather minor-appearing changes in
+wording.
+
+Pension costs in a labor intensive business clearly can be of major
+size and an important variable in the cost picture, particularly in
+
+a world characterized by high rates of inflation. I emphasize the
+latter factor to the point of redundancy because most managements I
+know - and virtually all elected officials in the case of governmental
+plans - simply never fully grasp the magnitude of liabilities they
+
+are incurring by relatively painless current promises. In many cases
+in the public area the bill in large part will be handed to the next
+generation, to be paid by increased taxes or by accelerated use of
+
+the printing press. But in a corporation the bill will have to be
+paid out of current and future revenues - with interest - and frequently
+with what is, in effect, a cost-of-living escalator.
+
+
+~t
+
+The "Earthquake Risk"
+
+In Germany, in the great inflation of the early 1920s, the entire
+Daimler Benz (Mercedes) Automobile Company was selling in the mar-
+
+ket for the price of 300 motor cars. Almost all past investments
+
+were nearly worthless, and current salary levels were astronomical
+
+in relation to past history. Under such conditions, or conditions
+
+far short of such an extreme, the burden of any pension benefits owed
+by a business, which are based on current salary levels though related
+to much earlier service in employment, must be backed almost exclus-
+ively by the current value (earning power) of the business. Advance
+funding simply evaporates.
+
+For example, assume that salaries (and the cost of living) are moving
+upward at 25% per year and the pension fund is earning 10% per
+
+year - a set of assumptions not ridiculously different from what
+exists in England at the moment. Under such conditions, funds put
+aside for retirement immediately begin to shrink in relation to prom-
+ised benefits. Every month fewer hamburgers can be purchased from
+the funds contributed to the pension plan - even after accumulating
+dividends and interest on the funds.
+
+Almost no one chooses to think about this sort of "earthquake risk"
+
+in dealing with pension plans, any more than people choose to spend
+much time thinking about nuclear war. It may be my earlier-mentioned
+bias, or my mathematical bent, but I believe some "unthinkable"
+inflation-related calculations should be made - and even considered -
+before any company assumes open-ended pension obligations guaranteeing
+a large number of persons absolute protection against inflation by
+gearing benefits without limit to final pay or escalating benefits
+
+to persons already retired, based on changes in the cost of Living.
+
+Thus, the really devastating possibility regarding private pension
+plans is sustained double-digit inflation. When salaries move ahead
+at a substantially higher rate than investment returns and benefits
+are tied to final salaries (or, even more expensively, cost-of-
+Living increases after retirement as in recent rubber and aluminum
+contracts), it is virtually impossible to pre-fund obligations. Like
+it or not, you become much like the Social Security Fund, absent the
+power to tax. Should that occur, future purchasers of the products
+of the company must be willing to do so at prices that reflect not
+only the wages of current workers, but the promises to past workers.
+Some businesses will have economic characteristics allowing them to
+pass along these costs, but others will have major troubles. On
+balance, I believe we are in relatively favorable businesses under
+
+
+such circumstances. I do not believe this problem can be solved by
+the investment process. I mention it for completeness, not because
+I have answers - and to urge caution in making pension benefit prom-
+ises subject to dramatic escalation through substantial attrition in
+the purchasing power of money.
+
+Now Letts look at funding and investment behavior appropriate to an
+economic world at Least reasonably similar to the past, recognizing
+that such a world is far from a certainty.
+
+The Investment Management Problem Inherent in All Pension Plans
+
+Once having committed to provide pensions, how do we pay? The law
+and prudent business practice mandate that we start putting aside
+funds on a fairly orderly and consistent basis from which we can ful-
+fill our promises. In this manner we pay the employee currently
+while he is being productive for the company, and we simultaneously
+set up a savings account (collectively, not individually) which will
+accumulate at interest so as to purchase an annuity (not actually
+"purchased" in most plans, of course, just assured by the pension
+fund) for him at retirement which will discharge our promise to pay
+him throughout his non-productive years. Thus, our current cost and
+current cash requirements (if our estimates are accurate as to what we
+will earn on the savings account as well as other estimates regarding
+turnover, salary escalation, longevity, etc.) will reflect his total
+lifetime employment costs to us spread rather evenly over his produc-
+tive years.
+
+(This advance funding treatment, matching full current costs against
+current production, contrasts with the Social Security Plan's pro-
+gram which essentially taxes current producers to pay current non-
+producers. This simply means moving a portion of current national
+output of goods and services over from those who produced it to those
+who are non-producing, and to whom promises have been made. If such
+a system had been in effect for a very long time, the demographic
+profile remained fairly constant, the promises remained fairly constant,
+and there was no inflation, the net effect from such a pay-as-you-go
+approach would not substantially differ from an advance funding basis.
+However, these conditions do not exist which may make for various
+problems - including some that exacerbate inflation and thus have
+negative fall-out for the economics of private plans.)
+
+Because a business corporation, unlike the Federal government, has to
+create a "savings account" - an investment accumulating and investment
