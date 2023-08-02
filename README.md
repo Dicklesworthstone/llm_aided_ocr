@@ -45,6 +45,7 @@ rm llama-2-13b-chat.ggmlv3.q5_K_S.bin
 rm llama-2-13b-chat.ggmlv3.q6_K.bin
 rm llama-2-13b-chat.ggmlv3.q8_0.bin
 ```
+If you have a less powerful machine, you might opt for one of the smaller models, such as `llama-2-13b-chat.ggmlv3.q3_K_S.bin`. Whichever model file you end up using, just make sure that you update the path in the `model_file_path` variable in the script appropriately. 
 
 ## How It Works
 The project begins by converting a given PDF into images using the `pdf2image` library. It then applies OCR to each image using `pytesseract`, with parallel processing enabled via the multiprocessing library for speed. The OCR'ed text is subsequently passed through the Llama2 13B Chat model, which aids in correcting OCR errors and enhancing the formatting of the text. The program offers options to verify if the OCR output is valid English and to reformat the text using markdown. The final text is written to an output file. Furthermore, the project has a function to filter potential hallucinations from the LLM corrected text using sentence embeddings and cosine similarity to compare with the original OCR text. 
