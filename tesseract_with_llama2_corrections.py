@@ -9,7 +9,6 @@ import os
 # git lfs install
 # git clone https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML
 
-
 def convert_pdf_to_images_func(input_pdf_file_path, max_test_pages):
     if max_test_pages == 0:
         print(f"Now converting all pages of PDF file {input_pdf_file_path} to images...")
@@ -30,12 +29,16 @@ def check_extracted_pages_func(extracted_text_string):
     return extracted_text_string
 
 def remove_intro(llm_output_2_text):
-    # Strip leading and trailing whitespace before splitting the lines
-    lines = llm_output_2_text.strip().splitlines()
-    # Skip the first line and the following blank line
-    lines = lines[2:] if lines[1].strip() == '' else lines[1:]
-    return '\n'.join(lines)
-
+    try:
+        # Strip leading and trailing whitespace before splitting the lines
+        lines = llm_output_2_text.strip().splitlines()
+        # Skip the first line and the following blank line
+        lines = lines[2:] if lines[1].strip() == '' else lines[1:]
+        return '\n'.join(lines)
+    except Exception as e:
+        print(f"Exception in remove_intro: {e}")
+        return llm_output_2_text
+    
 def is_valid_english(llm_output_1_text):
     # Use the lower() function to make the string comparison case-insensitive.
     # Use the strip() function to remove any leading or trailing white space.
@@ -79,7 +82,7 @@ def ocr_image(image):
 
 if __name__ == '__main__':
     input_pdf_file_path = '160301289-Warren-Buffett-Katharine-Graham-Letter.pdf'
-    max_test_pages = 0 # set to 0 to convert all pages of the PDF file using Tesseract
+    max_test_pages = 5 # set to 0 to convert all pages of the PDF file using Tesseract
     skip_first_n_pages = 0 # set to 0 to process all pages with the LLM
     check_if_valid_english = False # set to True to check if the extracted text is valid English
     reformat_as_markdown = True # set to True to reformat the corrected extracted text using markdown formatting
@@ -90,10 +93,10 @@ if __name__ == '__main__':
     llm = Llama(model_path=model_file_path, n_ctx=2048)
     print(f"Tesseract version: {pytesseract.get_tesseract_version()}")
 
-    print(f"Extracting text from converted pages...")
+    print("Extracting text from converted pages...")
     with Pool() as p:
         list_of_extracted_text_strings = p.map(ocr_image, list_of_scanned_images)
-    print(f"Done extracting text from converted pages. \n")
+    print("Done extracting text from converted pages. \n")
 
     raw_ocr_output = "\n".join(list_of_extracted_text_strings)
     base_name = os.path.splitext(input_pdf_file_path)[0]
