@@ -91,3 +91,6 @@ There are two additional helper functions used in this process:
 - `calculate_similarity`: This function takes a tuple of two embeddings as argument and returns their cosine similarity.
 
 This mechanism of filtering hallucinations is a heuristic approach and it might not be perfect. The `threshold` and `threshold_increment` values might need to be tuned according to the specific requirements of the use case.
+
+## Contributions 
+I made this mostly for fun and to learn more about using LLMs for more "utilitarian" tasks. That being said, I think this could eventually become a pretty useful tool for doing OCR on challenging files that result in tons of errors when using regular OCR without any "smart" corrections. If you're interested in helping, please submit a PR!
