@@ -173,7 +173,7 @@ if __name__ == '__main__':
     reformat_as_markdown = True # set to True to reformat the corrected extracted text using markdown formatting
     model_file_path = "./Llama-2-13B-chat-GGML/llama-2-13b-chat.ggmlv3.q4_0.bin"
     sentence_embeddings_db_path = "./sentence_embeddings.sqlite"
-    test_filtering_hallucinations = True # set to True to test filtering hallucinations (for debugging purposes)
+    test_filtering_hallucinations = False # set to True to test filtering hallucinations (for debugging purposes)
 
     if not test_filtering_hallucinations:
         list_of_scanned_images = convert_pdf_to_images_func(input_pdf_file_path, max_test_pages)
