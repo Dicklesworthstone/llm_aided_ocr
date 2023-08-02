@@ -12,15 +12,20 @@ If you just want to preview the output, you can look at the [source PDF](https:/
 
 ```
 sudo apt-get install -y tesseract-ocr libtesseract-dev poppler-utils
-git lfs install
-git clone https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML
 
+git clone https://github.com/Dicklesworthstone/llama2_aided_tesseract
+cd llama2_aided_tesseract
 python3 -m venv venv
 source venv/bin/activate
 python3 -m pip install --upgrade pip
 python3 -m pip install wheel
 pip install -r requirements.txt
+
+git lfs install
+git clone https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML
 ```
+*Warning*: The last command above will download ~108gb worth of data for the model weights, so make sure you have enough free storage!
+
 
 ## How It Works
 The project begins by converting a given PDF into images using the `pdf2image` library. It then applies OCR to each image using `pytesseract`, with parallel processing enabled via the multiprocessing library for speed. The OCR'ed text is subsequently passed through the Llama2 13B Chat model, which aids in correcting OCR errors and enhancing the formatting of the text. The program offers options to verify if the OCR output is valid English and to reformat the text using markdown. The final text is written to an output file. Furthermore, the project has a function to filter potential hallucinations from the LLM corrected text using sentence embeddings and cosine similarity to compare with the original OCR text. 
