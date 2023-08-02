@@ -1,8 +1,9 @@
-pandas
-opencv-python
-pytesseract
+langchain
 llama-cpp-python
+opencv-python
+pandas
 pdf2image
 pillow
-fuzzywuzzy
-python-Levenshtein
+pytesseract
+scikit-learn
+tqdm
