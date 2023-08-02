@@ -43,6 +43,8 @@ The program will create 3 output files:
 2. LLM corrected output
 3. LLM corrected output with hallucinations filtered out
 
+*Note*: This script is pretty slow, particularly on longer PDFs. The sample PDF mentioned above in the "Example Output" section took around an hour to completely process on a fairly powerful machine, but where everything was done using a CPU rather than a GPU.
+
 ## Functions
 Here are some of the important functions and what they do:
 
