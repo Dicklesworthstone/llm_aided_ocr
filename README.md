@@ -5,6 +5,9 @@ This project focuses on improving the quality of Optical Character Recognition (
 ## Purpose
 The purpose of the project is to convert scanned PDFs into readable text files by leveraging OCR and then enhance the quality of the OCR output by correcting errors and formatting the text for readability using an LLM. 
 
+## Example Output
+If you just want to preview the output, you can look at the [source PDF](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter.pdf) and the [raw output of the Tesseract OCR process](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt), and compare this to the [final markdown output after filtering out hallucinations](https://github.com/Dicklesworthstone/llama2_aided_tesseract/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter_filtered.md).
+
 ## Set up instructions:
 
 ```
