@@ -29,10 +29,10 @@ def ocr_image(image):
     
 def check_extracted_pages_func(extracted_text_string):
     #first check if it's long enough to be a page:
-    if len(extracted_text_string) < 20:
+    if len(extracted_text_string) < 10:
         return False
     #now check if it has enough words to be a page:
-    if len(extracted_text_string.split()) < 10:
+    if len(extracted_text_string.split()) < 5:
         return False
     return extracted_text_string
 
@@ -120,11 +120,11 @@ def filter_hallucinations(corrected_text, raw_text, threshold=0.1, pdf_file_path
         original_embeddings = None
         corrected_embeddings = None
     llama = LlamaCppEmbeddings(model_path=model_file_path)
-    original_sentences = [s for s in raw_text.split('. ') if len(s) > 10]
+    original_sentences = [s for s in raw_text.split('. ')]
     if original_embeddings is None:
         print("Calculating embeddings for original sentences...")
         original_embeddings = {s: calculate_sentence_embedding(llama, s) for s in tqdm(original_sentences)}
-    corrected_sentences = [s for s in corrected_text.split('. ') if len(s) > 10]
+    corrected_sentences = [s for s in corrected_text.split('. ')]
     if corrected_embeddings is None:
         print("Calculating embeddings for corrected sentences...")
         corrected_embeddings = {s: calculate_sentence_embedding(llama, s) for s in tqdm(corrected_sentences)}
