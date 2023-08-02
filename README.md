@@ -44,6 +44,7 @@ The program will create 3 output files:
 3. LLM corrected output with hallucinations filtered out
 
 *Note*: This script is pretty slow, particularly on longer PDFs. The sample PDF mentioned above in the "Example Output" section took around an hour to completely process on a fairly powerful machine, but where everything was done using a CPU rather than a GPU.
+*Update*: On closer inspection, this command is actually retrieving many different versions of the same model. Based on a review of the [model description page](https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML), `llama-2-13b-chat.ggmlv3.q4_K_S.bin` might be a good choice of these various models for users with a powerful machine. Thus you can delete most of the other downloaded files to free up space. 
 
 ## Functions
 Here are some of the important functions and what they do:
