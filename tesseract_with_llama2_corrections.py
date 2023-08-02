@@ -91,7 +91,7 @@ def calculate_similarity(args):
     return cosine_similarity([corrected_embedding], [original_embedding])
 
 def filter_hallucinations(corrected_text, raw_text, threshold=0.1, pdf_file_path=None, db_path=None):
-    threshold_increment = 0.01
+    threshold_increment = 0.02
     if db_path is not None and pdf_file_path is not None:
         # Check if the database file exists
         if not os.path.isfile(db_path):
@@ -165,11 +165,10 @@ def filter_hallucinations(corrected_text, raw_text, threshold=0.1, pdf_file_path
 
 
 if __name__ == '__main__':
-    #input_pdf_file_path = '160301289-Warren-Buffett-Katharine-Graham-Letter.pdf'
-    input_pdf_file_path = '18_PDFsam_How Atomic Submarines are Made (David C. Cooke).pdf'
+    input_pdf_file_path = '160301289-Warren-Buffett-Katharine-Graham-Letter.pdf'
     max_test_pages = 0 # set to 0 to convert all pages of the PDF file using Tesseract
     skip_first_n_pages = 0 # set to 0 to process all pages with the LLM
-    starting_hallucination_similarity_threshold = 0.25 # The higher you set this, the more potential hallucinations will be filtered out (but also the more potential correct sentences will be filtered out)
+    starting_hallucination_similarity_threshold = 0.40 # The higher you set this, the more potential hallucinations will be filtered out (but also the more potential correct sentences will be filtered out)
     check_if_valid_english = False # set to True to check if the extracted text is valid English
     reformat_as_markdown = True # set to True to reformat the corrected extracted text using markdown formatting
     model_file_path = "./Llama-2-13B-chat-GGML/llama-2-13b-chat.ggmlv3.q4_0.bin"
