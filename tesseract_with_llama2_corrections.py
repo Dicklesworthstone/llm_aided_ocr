@@ -79,11 +79,10 @@ def calculate_sentence_embedding(llama, text):
         try:
             sentence_embedding = llama.embed_query(text)
         except Exception as e:
-            if str(e) == "llama_tokenize_with_model: too many tokens":
-                text = text[:int(len(text)*0.95)]
-                print(f"Trimming sentence due to too many tokens. New length: {len(text)}")
-            else:
-                raise e
+            #If the sentence is too long, resulting in the error "llama_tokenize_with_model: too many tokens", then trim the sentence and try again
+            print(f"Exception in calculate_sentence_embedding: {e}")
+            text = text[:int(len(text)*0.95)]
+            print(f"Trimming sentence due to too many tokens. New length: {len(text)}")
     return sentence_embedding
 
 def calculate_similarity(args):
