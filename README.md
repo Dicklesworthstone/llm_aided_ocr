@@ -25,7 +25,26 @@ git lfs install
 git clone https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML
 ```
 *Warning*: The last command above will download ~108gb worth of data for the model weights, so make sure you have enough free storage!
-*Update*: On closer inspection, this command is actually retrieving many different versions of the same model. Based on a review of the [model description page](https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML), `llama-2-13b-chat.ggmlv3.q4_K_S.bin` might be a good choice of these various models for users with a powerful machine. Thus you can delete most of the other downloaded files to free up space. 
+
+*Update*: On closer inspection, this command is actually retrieving many different versions of the same model. Based on a review of the [model description page](https://huggingface.co/TheBloke/Llama-2-13B-chat-GGML), `llama-2-13b-chat.ggmlv3.q4_K_S.bin` might be a good choice of these various models for users with a powerful machine. Thus, you could delete most of the other downloaded files to free up space:
+
+```
+cd Llama-2-13B-chat-GGML
+rm llama-2-13b-chat.ggmlv3.q2_K.bin
+rm llama-2-13b-chat.ggmlv3.q3_K_L.bin
+rm llama-2-13b-chat.ggmlv3.q3_K_M.bin
+rm llama-2-13b-chat.ggmlv3.q3_K_S.bin
+rm llama-2-13b-chat.ggmlv3.q4_0.bin
+rm llama-2-13b-chat.ggmlv3.q4_1.bin
+rm llama-2-13b-chat.ggmlv3.q4_K_M.bin
+# rm llama-2-13b-chat.ggmlv3.q4_K_S.bin <-- If this is the one you want to keep.
+rm llama-2-13b-chat.ggmlv3.q5_0.bin
+rm llama-2-13b-chat.ggmlv3.q5_1.bin
+rm llama-2-13b-chat.ggmlv3.q5_K_M.bin
+rm llama-2-13b-chat.ggmlv3.q5_K_S.bin
+rm llama-2-13b-chat.ggmlv3.q6_K.bin
+rm llama-2-13b-chat.ggmlv3.q8_0.bin
+```
 
 ## How It Works
 The project begins by converting a given PDF into images using the `pdf2image` library. It then applies OCR to each image using `pytesseract`, with parallel processing enabled via the multiprocessing library for speed. The OCR'ed text is subsequently passed through the Llama2 13B Chat model, which aids in correcting OCR errors and enhancing the formatting of the text. The program offers options to verify if the OCR output is valid English and to reformat the text using markdown. The final text is written to an output file. Furthermore, the project has a function to filter potential hallucinations from the LLM corrected text using sentence embeddings and cosine similarity to compare with the original OCR text. 
