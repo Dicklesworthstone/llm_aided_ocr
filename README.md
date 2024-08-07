@@ -1,45 +1,11 @@
 # LLM-Aided OCR Project
 
-## Table of Contents
-- [LLM-Aided OCR Project](#llm-aided-ocr-project)
-  - [Table of Contents](#table-of-contents)
-  - [Introduction](#introduction)
-  - [Features](#features)
-  - [Requirements](#requirements)
-  - [Installation](#installation)
-  - [Usage](#usage)
-  - [Example Output](#example-output)
-    - [Sample Document: Warren Buffett's Letter to Katharine Graham](#sample-document-warren-buffetts-letter-to-katharine-graham)
-  - [How It Works](#how-it-works)
-    - [1. PDF Conversion](#1-pdf-conversion)
-    - [2. OCR (Optical Character Recognition)](#2-ocr-optical-character-recognition)
-    - [3. Text Chunking](#3-text-chunking)
-    - [4. Error Correction](#4-error-correction)
-    - [5. Markdown Formatting (Optional)](#5-markdown-formatting-optional)
-    - [6. Duplicate Removal](#6-duplicate-removal)
-    - [7. Hallucination Filtering](#7-hallucination-filtering)
-    - [8. Post-processing](#8-post-processing)
-    - [9. Quality Assessment](#9-quality-assessment)
-    - [Additional Implementation Notes](#additional-implementation-notes)
-  - [Advanced Techniques](#advanced-techniques)
-    - [Smart Chunking](#smart-chunking)
-    - [Embedding-based Hallucination Filtering](#embedding-based-hallucination-filtering)
-    - [Asynchronous Processing](#asynchronous-processing)
-    - [Adaptive Token Management](#adaptive-token-management)
-    - [Multi-stage Processing](#multi-stage-processing)
-    - [Fallback Mechanisms](#fallback-mechanisms)
-  - [Configuration](#configuration)
-  - [Output Files](#output-files)
-  - [Quality Assessment](#quality-assessment)
-  - [Limitations and Future Improvements](#limitations-and-future-improvements)
-  - [Contributing](#contributing)
-  - [License](#license)
-
 ## Introduction
 
 The LLM-Aided OCR Project is a sophisticated system designed to dramatically improve the quality of Optical Character Recognition (OCR) output. It employs a combination of advanced natural language processing techniques, machine learning, and intelligent text processing to transform raw OCR text into highly accurate, well-formatted, and readable documents.
 
 The project addresses common OCR issues such as:
+
 - Misrecognized characters and words
 - Incorrect line breaks and paragraph structures
 - Hallucinated content
@@ -350,10 +316,9 @@ The system includes an LLM-based quality assessment step that compares the final
 - The hallucination filtering step may occasionally remove valid content if it's significantly different from the majority of the text.
 
 Future improvements could include:
+
 - Integration with more OCR engines for comparison and improved initial text recognition.
 - Implementation of a user interface for easier configuration and monitoring.
-- Support for more document formats beyond PDF.
-- Fine-tuning of LLMs specifically for OCR post-processing tasks.
 
 ## Contributing
 
@@ -361,4 +326,4 @@ Contributions to this project are welcome! Please fork the repository and submit
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+This project is licensed under the MIT License.
