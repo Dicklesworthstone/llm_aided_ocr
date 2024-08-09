@@ -20,7 +20,6 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
 - Smart text chunking for efficient processing
 - Markdown formatting option
 - Header and page number suppression (optional)
-- Duplicate content removal
 - Quality assessment of the final output
 - Support for both local LLMs and cloud-based API providers (OpenAI, Anthropic)
 - Asynchronous processing for improved performance
