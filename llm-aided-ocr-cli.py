@@ -1,6 +1,6 @@
 import argparse
 import asyncio
-from tesseract_with_llm_corrections import main as process_pdf
+from llm_aided_ocr import main as process_pdf
 
 
 def parse_arguments():
@@ -27,8 +27,6 @@ async def run_pdf_processor(args):
         test_filtering_hallucinations=args.test_filtering
     )
     
-print("Running tesseract-llm-cli! Example: python pdf_processor_cli.py input.pdf --max-pages 10 --threshold 0.5 --check-english")
-
 if __name__ == "__main__":
     args = parse_arguments()
     asyncio.run(run_pdf_processor(args))

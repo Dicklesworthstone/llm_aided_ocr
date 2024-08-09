@@ -4,16 +4,14 @@ import traceback
 import asyncio
 import json
 import re
-import time
 import urllib.request
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import warnings
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional
 from pdf2image import convert_from_path
 import pytesseract
 from llama_cpp import Llama, LlamaGrammar
-import httpx
 import tiktoken
 import numpy as np
 from PIL import Image
@@ -23,11 +21,6 @@ from filelock import FileLock, Timeout
 from transformers import AutoTokenizer
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
-from langdetect import detect, LangDetectException
-import faiss
-import nltk
-from nltk.tokenize import sent_tokenize
-nltk.download('punkt')
 try:
     import nvgpu
     GPU_AVAILABLE = True
@@ -38,18 +31,16 @@ except ImportError:
 config = DecoupleConfig(RepositoryEnv('.env'))
 
 USE_LOCAL_LLM = config.get("USE_LOCAL_LLM", default=False, cast=bool)
-API_PROVIDER = config.get("API_PROVIDER", default="OPENAI", cast=str)
+API_PROVIDER = config.get("API_PROVIDER", default="CLAUDE", cast=str) # OPENAI or CLAUDE
 ANTHROPIC_API_KEY = config.get("ANTHROPIC_API_KEY", default="your-anthropic-api-key", cast=str)
 OPENAI_API_KEY = config.get("OPENAI_API_KEY", default="your-openai-api-key", cast=str)
-OPENROUTER_API_KEY = config.get("OPENROUTER_API_KEY", default="your-openrouter-api-key", cast=str)
 CLAUDE_MODEL_STRING = config.get("CLAUDE_MODEL_STRING", default="claude-3-haiku-20240307", cast=str)
-CLAUDE_MAX_TOKENS = 4096  # Maximum allowed tokens for Claude API
+CLAUDE_MAX_TOKENS = 4096 # Maximum allowed tokens for Claude API
 TOKEN_BUFFER = 500  # Buffer to account for token estimation inaccuracies
-TOKEN_CUSHION = 100 # Don't use the full max tokens to avoid hitting the limit
+TOKEN_CUSHION = 300 # Don't use the full max tokens to avoid hitting the limit
 OPENAI_COMPLETION_MODEL = config.get("OPENAI_COMPLETION_MODEL", default="gpt-4o-mini", cast=str)
 OPENAI_EMBEDDING_MODEL = config.get("OPENAI_EMBEDDING_MODEL", default="text-embedding-3-small", cast=str)
-OPENAI_MAX_TOKENS = 4096  # Maximum allowed tokens for OpenAI API
-OPENROUTER_MODEL = config.get("OPENROUTER_MODEL", default="meta-llama/llama-3.1-8b-instruct:free", cast=str)
+OPENAI_MAX_TOKENS = 12000  # Maximum allowed tokens for OpenAI API
 DEFAULT_LOCAL_MODEL_NAME = "Llama-3.1-8B-Lexi-Uncensored_Q5_fixedrope.gguf"
 LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS = 2048
 USE_VERBOSE = False
@@ -161,29 +152,14 @@ def load_model(llm_model_name: str, raise_exception: bool = True):
             raise
         return None
 
-def improved_sentence_split(text):
-    return sent_tokenize(text)
-
 # API Interaction Functions
-async def generate_completion(prompt: str, max_tokens: int = 1000) -> Optional[str]:
+async def generate_completion(prompt: str, max_tokens: int = 5000) -> Optional[str]:
     if USE_LOCAL_LLM:
         return await generate_completion_from_local_llm(DEFAULT_LOCAL_MODEL_NAME, prompt, max_tokens)
     elif API_PROVIDER == "CLAUDE":
         return await generate_completion_from_claude(prompt, max_tokens)
     elif API_PROVIDER == "OPENAI":
         return await generate_completion_from_openai(prompt, max_tokens)
-    elif API_PROVIDER == "OPENROUTER":
-        return await generate_completion_from_openrouter(prompt, max_tokens)
-    else:
-        logging.error(f"Invalid API_PROVIDER: {API_PROVIDER}")
-        return None
-
-async def generate_embedding(text: str) -> Optional[List[float]]:
-    if USE_LOCAL_LLM:
-        llm = load_model(DEFAULT_LOCAL_MODEL_NAME)
-        return llm.embed(text)
-    elif API_PROVIDER in ["CLAUDE", "OPENAI", "OPENROUTER"]:
-        return await generate_embedding_with_retry(text)
     else:
         logging.error(f"Invalid API_PROVIDER: {API_PROVIDER}")
         return None
@@ -228,32 +204,36 @@ def approximate_tokens(text: str) -> int:
 
 def chunk_text(text: str, max_chunk_tokens: int, model_name: str) -> List[str]:
     chunks = []
+    tokenizer = get_tokenizer(model_name)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
     current_chunk = []
     current_chunk_tokens = 0
-    for sentence in re.split(r'(?<=[.!?])\s+', text):
-        sentence_tokens = estimate_tokens(sentence, model_name)
-        if sentence_tokens > max_chunk_tokens:
-            # If a single sentence exceeds max_chunk_tokens, split it
-            sentence_chunks = split_long_sentence(sentence, max_chunk_tokens, model_name)
-            chunks.extend(sentence_chunks)
-        elif current_chunk_tokens + sentence_tokens > max_chunk_tokens and current_chunk:
+    
+    for sentence in sentences:
+        sentence_tokens = len(tokenizer.encode(sentence))
+        if current_chunk_tokens + sentence_tokens > max_chunk_tokens:
             chunks.append(' '.join(current_chunk))
             current_chunk = [sentence]
             current_chunk_tokens = sentence_tokens
         else:
             current_chunk.append(sentence)
             current_chunk_tokens += sentence_tokens
+    
     if current_chunk:
         chunks.append(' '.join(current_chunk))
-    return chunks
+    
+    adjusted_chunks = adjust_overlaps(chunks, tokenizer, max_chunk_tokens)
+    return adjusted_chunks
 
 def split_long_sentence(sentence: str, max_tokens: int, model_name: str) -> List[str]:
     words = sentence.split()
     chunks = []
     current_chunk = []
     current_chunk_tokens = 0
+    tokenizer = get_tokenizer(model_name)
+    
     for word in words:
-        word_tokens = estimate_tokens(word, model_name)
+        word_tokens = len(tokenizer.encode(word))
         if current_chunk_tokens + word_tokens > max_tokens and current_chunk:
             chunks.append(' '.join(current_chunk))
             current_chunk = [word]
@@ -261,9 +241,27 @@ def split_long_sentence(sentence: str, max_tokens: int, model_name: str) -> List
         else:
             current_chunk.append(word)
             current_chunk_tokens += word_tokens
+    
     if current_chunk:
         chunks.append(' '.join(current_chunk))
+    
     return chunks
+
+def adjust_overlaps(chunks: List[str], tokenizer, max_chunk_tokens: int, overlap_size: int = 50) -> List[str]:
+    adjusted_chunks = []
+    for i in range(len(chunks)):
+        if i == 0:
+            adjusted_chunks.append(chunks[i])
+        else:
+            overlap_tokens = len(tokenizer.encode(' '.join(chunks[i-1].split()[-overlap_size:])))
+            current_tokens = len(tokenizer.encode(chunks[i]))
+            if overlap_tokens + current_tokens > max_chunk_tokens:
+                overlap_adjusted = chunks[i].split()[:-overlap_size]
+                adjusted_chunks.append(' '.join(overlap_adjusted))
+            else:
+                adjusted_chunks.append(' '.join(chunks[i-1].split()[-overlap_size:] + chunks[i].split()))
+    
+    return adjusted_chunks
 
 async def generate_completion_from_claude(prompt: str, max_tokens: int = CLAUDE_MAX_TOKENS - TOKEN_BUFFER) -> Optional[str]:
     if not ANTHROPIC_API_KEY:
@@ -308,7 +306,7 @@ async def generate_completion_from_claude(prompt: str, max_tokens: int = CLAUDE_
             logging.error(f"An error occurred while requesting from Claude API: {e}")
             return None
 
-async def generate_completion_from_openai(prompt: str, max_tokens: int = 1000) -> Optional[str]:
+async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -> Optional[str]:
     if not OPENAI_API_KEY:
         logging.error("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
         return None
@@ -347,38 +345,6 @@ async def generate_completion_from_openai(prompt: str, max_tokens: int = 1000) -
         except Exception as e:
             logging.error(f"An error occurred while requesting from OpenAI API: {e}")
             return None
-
-async def generate_completion_from_openrouter(prompt: str, max_tokens: int = 1000) -> Optional[str]:
-    if not OPENROUTER_API_KEY:
-        logging.error("OpenRouter API key not found. Please set the OPENROUTER_API_KEY environment variable.")
-        return None
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-    }
-    data = {
-        "model": OPENROUTER_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens,
-        "temperature": 0.7,
-    }
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                json=data,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except httpx.HTTPStatusError as e:
-            logging.error(f"HTTP error occurred: {e}")
-        except httpx.RequestError as e:
-            logging.error(f"An error occurred while requesting: {e}")
-        except KeyError:
-            logging.error("Unexpected response format from OpenRouter API")
-        return None
 
 async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7, grammar_file_string: str = None):
     logging.info(f"Starting text completion using model: '{llm_model_name}' for input prompt: '{input_prompt}'")
@@ -436,52 +402,6 @@ async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: 
             "llm_model_usage_json": llm_model_usage_json
         }
 
-async def generate_embedding_from_openai(text: str) -> Optional[List[float]]:
-    if not OPENAI_API_KEY:
-        logging.error("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
-        return None
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                "https://api.openai.com/v1/embeddings",
-                headers={
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": OPENAI_EMBEDDING_MODEL,
-                    "input": text
-                },
-                timeout=30.0  # Add a timeout to prevent hanging
-            )
-            response.raise_for_status()
-            return response.json()["data"][0]["embedding"]  # This is already a list of floats
-        except httpx.HTTPStatusError as e:  # noqa: F841
-            pass  # Let the error handling code below handle HTTP errors
-        except httpx.RequestError as e:  # noqa: F841
-            pass  # Let the error handling code below handle request errors
-        except KeyError:
-            logging.error("Unexpected response format from OpenAI API")
-        except Exception as e:
-            logging.error(f"An unexpected error occurred while generating embedding: {e}")
-        return None
-    
-async def generate_embedding_with_retry(text: str, max_retries: int = 3, base_delay: float = 1.0) -> Optional[List[float]]:
-    for attempt in range(max_retries):
-        try:
-            embedding = await generate_embedding_from_openai(text)
-            if embedding is not None:
-                return embedding
-        except Exception as e:
-            logging.warning(f"Error generating embedding (attempt {attempt + 1}/{max_retries}): {e}")
-        
-        if attempt < max_retries - 1:
-            delay = base_delay * (2 ** attempt)  # Exponential backoff
-            logging.info(f"Retrying in {delay:.2f} seconds...")
-            time.sleep(delay)
-    logging.error(f"Failed to generate embedding after {max_retries} attempts")
-    return None    
-    
 # Image Processing Functions
 def preprocess_image(image):
     gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
@@ -507,155 +427,8 @@ def ocr_image(image):
     preprocessed_image = preprocess_image(image)
     return pytesseract.image_to_string(preprocessed_image)
 
-def is_valid_english(text: str) -> bool:
-    if not text:
-        return False
-    try:
-        return detect(text) == 'en'
-    except LangDetectException:
-        logging.warning("Language detection failed. Assuming text is not valid English.")
-        return False
-
-async def calculate_sentence_embedding(text):
-    max_retries = 3
-    for attempt in range(max_retries):
-        embedding = await generate_embedding_with_retry(text)
-        if embedding is not None:
-            return embedding  # This is already a list of floats
-        logging.warning(f"Failed to generate embedding, attempt {attempt + 1} of {max_retries}")
-        await asyncio.sleep(2 ** attempt)  # Exponential backoff
-    logging.error(f"Failed to calculate embedding after {max_retries} attempts")
-    return None
-
-async def calculate_embeddings_batch(sentences: List[str]) -> np.ndarray:
-    batch_size = 30  # Adjust based on API limits and performance
-    all_embeddings = []
-    for i in range(0, len(sentences), batch_size):
-        batch = sentences[i:i+batch_size]
-        batch_embeddings = await asyncio.gather(*[calculate_sentence_embedding(s) for s in batch])
-        # Process and add valid embeddings
-        for embedding in batch_embeddings:
-            if embedding is not None:
-                try:
-                    embedding_array = np.array(embedding).astype('float32')
-                    all_embeddings.append(embedding_array)
-                except ValueError:
-                    logging.warning(f"Failed to convert embedding to numpy array for a sentence in batch {i//batch_size + 1}")
-    if not all_embeddings:
-        logging.error("No valid embeddings were generated in the batch.")
-        return np.array([])
-    return np.vstack(all_embeddings)
-
-def log_filtering_results(filtered_text: str, original_text: str) -> None:
-    filtered_length = len(filtered_text)
-    original_length = len(original_text)
-    diff = original_length - filtered_length
-    logging.info(f"Filtered text length: {filtered_length:,}; original text length: {original_length:,}")
-    logging.info(f"Difference in length: {diff:,} characters ({(diff / original_length) * 100:.2f}% reduction)")
-    logging.info(f"Percentage of original text retained: {(filtered_length / original_length) * 100:.2f}%")
-
-async def smart_split_into_chunks(text: str, chunk_size: int = 1000, max_retries: int = 3) -> List[Tuple[str, bool]]:
-    async def get_valid_json_response(prompt: str) -> Optional[List[Dict[str, Any]]]:
-        for attempt in range(max_retries):
-            try:
-                response = await generate_completion(prompt, max_tokens=2000)
-                # Remove any non-JSON content
-                json_start = response.find('[')
-                json_end = response.rfind(']') + 1
-                if json_start != -1 and json_end != -1:
-                    response = response[json_start:json_end]
-                chunks = json.loads(response)
-                return chunks
-            except json.JSONDecodeError:
-                logging.warning(f"Failed to parse JSON response (attempt {attempt + 1}/{max_retries})")
-                if attempt == max_retries - 1:
-                    logging.error("Max retries reached. Failed to get valid JSON response.")
-                    return None
-            await asyncio.sleep(1)  # Add a small delay between retries
-
-    prompt = f"""Analyze the following text and split it into logical chunks of approximately {chunk_size} characters each. 
-    Preserve the document structure, including headers, paragraphs, and formatting.
-    For each chunk, determine if it's a header (true) or content (false).
-    Output the result as a JSON array of objects, each with 'text' and 'is_header' properties.
-    Ensure that headers are always in their own chunk.
-
-    IMPORTANT: YOU MUST RESPOND ONLY WITH VALID JSON. DO NOT INCLUDE ANY INTRODUCTION, EXPLANATION, OR EXTRA TEXT. ONLY PROVIDE THE JSON ARRAY.
-
-    Text to analyze:
-    {text[:10000]}  # Limit input to avoid exceeding token limits
-
-    Output format:
-    [
-        {{"text": "chunk1 text here", "is_header": false}},
-        {{"text": "## Header", "is_header": true}},
-        {{"text": "chunk2 text here", "is_header": false}}
-    ]
-    """
-
-    chunks = await get_valid_json_response(prompt)
-    
-    if chunks is None:
-        logging.error("Failed to get valid JSON response after multiple attempts. Falling back to simple split.")
-        return [(text[i:i+chunk_size], False) for i in range(0, len(text), chunk_size)]
-    
-    return [(chunk['text'], chunk['is_header']) for chunk in chunks]
-
-async def filter_hallucinations(corrected_text: str, raw_text: str, threshold: float = 0.7, pdf_file_path: Optional[str] = None, db_path: Optional[str] = None) -> str:
-    logging.info(f"Starting optimized FAISS-based hallucination filtering with smart chunking. Threshold: {threshold}")
-    
-    corrected_chunks = await smart_split_into_chunks(corrected_text)
-    raw_chunks = await smart_split_into_chunks(raw_text)
-
-    # Process non-header chunks
-    corrected_text_chunks = [chunk for chunk, is_header in corrected_chunks if not is_header]
-    raw_text_chunks = [chunk for chunk, is_header in raw_chunks if not is_header]
-
-    # Build FAISS index for original chunks
-    raw_embeddings = await calculate_embeddings_batch(raw_text_chunks)
-    if raw_embeddings.size == 0:
-        logging.error("No valid embeddings were generated for the original text.")
-        return corrected_text
-
-    faiss.normalize_L2(raw_embeddings)
-    index = faiss.IndexFlatIP(raw_embeddings.shape[1])
-    index.add(raw_embeddings)
-
-    # Process corrected chunks
-    corrected_embeddings = await calculate_embeddings_batch(corrected_text_chunks)
-    if corrected_embeddings.size == 0:
-        logging.error("No valid embeddings were generated for the corrected text.")
-        return corrected_text
-
-    faiss.normalize_L2(corrected_embeddings)
-    similarities, _ = index.search(corrected_embeddings, 1)
-    similarities = similarities.flatten()
-
-    # Filter chunks
-    filtered_chunks = []
-    non_header_index = 0
-    for chunk, is_header in corrected_chunks:
-        if is_header:
-            filtered_chunks.append(chunk)
-        else:
-            if similarities[non_header_index] >= threshold:
-                filtered_chunks.append(chunk)
-            else:
-                logging.debug(f"Chunk filtered out. Similarity: {similarities[non_header_index]:.4f}")
-            non_header_index += 1
-
-    # Join filtered chunks
-    filtered_text = '\n'.join(filtered_chunks)
-
-    # Log metrics
-    log_filtering_results(filtered_text, raw_text)
-    logging.info(f"Similarities - Mean: {np.mean(similarities):.4f}, Median: {np.median(similarities):.4f}, Min: {min(similarities):.4f}, Max: {max(similarities):.4f}")
-    logging.info(f"Chunks before filtering: {len(corrected_text_chunks):,}, after filtering: {len(filtered_chunks):,}")
-    logging.info(f"Percentage of chunks retained: {(len(filtered_chunks) / len(corrected_text_chunks)) * 100:.2f}%")
-
-    return filtered_text
-
-async def process_chunk(chunk: str, prev_context: str, chunk_index: int, total_chunks: int, check_if_valid_english: bool, reformat_as_markdown: bool, suppress_headers_and_page_numbers: bool) -> Tuple[str, str]:
-    logging.info(f"Processing chunk {chunk_index}/{total_chunks} (length: {len(chunk):,} characters)")
+async def process_chunk(chunk: str, prev_context: str, chunk_index: int, total_chunks: int, reformat_as_markdown: bool, suppress_headers_and_page_numbers: bool) -> Tuple[str, str]:
+    logging.info(f"Processing chunk {chunk_index + 1}/{total_chunks} (length: {len(chunk):,} characters)")
     
     # Step 1: OCR Correction
     ocr_correction_prompt = f"""Correct OCR-induced errors in the text, ensuring it flows coherently with the previous context. Follow these guidelines:
@@ -683,7 +456,7 @@ async def process_chunk(chunk: str, prev_context: str, chunk_index: int, total_c
 IMPORTANT: Respond ONLY with the corrected text. Preserve all original formatting, including line breaks. Do not include any introduction, explanation, or metadata.
 
 Previous context:
-{prev_context[-300:]}
+{prev_context[-500:]}
 
 Current chunk to process:
 {chunk}
@@ -706,7 +479,16 @@ Corrected text:
 4. Use emphasis (*italic*) and strong emphasis (**bold**) where appropriate, based on the original formatting
 5. Preserve all original content and meaning
 6. Do not add any extra punctuation or modify the existing punctuation
-7. {"Identify but do not remove headers, footers, or page numbers. Instead, format them distinctly, e.g., as blockquotes." if not suppress_headers_and_page_numbers else "Carefully remove headers, footers, and page numbers while preserving all other content."}
+7. Remove any spuriously inserted introductory text such as "Here is the corrected text:" that may have been added by the LLM and which is obviously not part of the original text.
+8. Remove and obviously duplicated content that appears to have been accidentally included twice. Follow these strict guidelines:
+   - Remove only exact or near-exact repeated paragraphs or sections within the main chunk.
+   - Consider the context (before and after the main chunk) to identify duplicates that span chunk boundaries.
+   - Do not remove content that is simply similar but conveys different information.
+   - Preserve all unique content, even if it seems redundant.
+   - Ensure the text flows smoothly after removal.
+   - Do not add any new content or explanations.
+   - If no obvious duplicates are found, return the main chunk unchanged.
+9. {"Identify but do not remove headers, footers, or page numbers. Instead, format them distinctly, e.g., as blockquotes." if not suppress_headers_and_page_numbers else "Carefully remove headers, footers, and page numbers while preserving all other content."}
 
 Text to reformat:
 
@@ -716,20 +498,20 @@ Reformatted markdown:
 """
         processed_chunk = await generate_completion(markdown_prompt, max_tokens=len(ocr_corrected_chunk) + 500)
     new_context = processed_chunk[-1000:]  # Use the last 1000 characters as context for the next chunk
-    logging.info(f"Chunk {chunk_index}/{total_chunks} processed. Output length: {len(processed_chunk):,} characters")
+    logging.info(f"Chunk {chunk_index + 1}/{total_chunks} processed. Output length: {len(processed_chunk):,} characters")
     return processed_chunk, new_context
 
-async def process_chunks(chunks: List[str], check_if_valid_english: bool, reformat_as_markdown: bool, suppress_headers_and_page_numbers: bool) -> List[str]:
+async def process_chunks(chunks: List[str], reformat_as_markdown: bool, suppress_headers_and_page_numbers: bool) -> List[str]:
     total_chunks = len(chunks)
     async def process_chunk_with_context(chunk: str, prev_context: str, index: int) -> Tuple[int, str, str]:
-        processed_chunk, new_context = await process_chunk(chunk, prev_context, index, total_chunks, check_if_valid_english, reformat_as_markdown, suppress_headers_and_page_numbers)
+        processed_chunk, new_context = await process_chunk(chunk, prev_context, index, total_chunks, reformat_as_markdown, suppress_headers_and_page_numbers)
         return index, processed_chunk, new_context
     if USE_LOCAL_LLM:
         logging.info("Using local LLM. Processing chunks sequentially...")
         context = ""
         processed_chunks = []
         for i, chunk in enumerate(chunks):
-            processed_chunk, context = await process_chunk(chunk, context, i, total_chunks, check_if_valid_english, reformat_as_markdown, suppress_headers_and_page_numbers)
+            processed_chunk, context = await process_chunk(chunk, context, i, total_chunks, reformat_as_markdown, suppress_headers_and_page_numbers)
             processed_chunks.append(processed_chunk)
     else:
         logging.info("Using API-based LLM. Processing chunks concurrently while maintaining order...")
@@ -741,178 +523,46 @@ async def process_chunks(chunks: List[str], check_if_valid_english: bool, reform
     logging.info(f"All {total_chunks} chunks processed successfully")
     return processed_chunks
 
-async def process_document(list_of_extracted_text_strings: List[str], check_if_valid_english: bool = False, reformat_as_markdown: bool = True, suppress_headers_and_page_numbers: bool = True) -> str:
+async def process_document(list_of_extracted_text_strings: List[str], reformat_as_markdown: bool = True, suppress_headers_and_page_numbers: bool = True) -> str:
     logging.info(f"Starting document processing. Total pages: {len(list_of_extracted_text_strings):,}")
     full_text = "\n\n".join(list_of_extracted_text_strings)
     logging.info(f"Size of full text before processing: {len(full_text):,} characters")
-    chunk_size, overlap = 8000, 1000
+    chunk_size, overlap = 2000, 10 
+    sentences = re.split(r'(?<=[.!?])\s+', full_text)  # Split on sentence boundaries
     chunks = []
-    start = 0
-    while start < len(full_text):
-        end = start + chunk_size
-        if end < len(full_text):
-            end = full_text.rfind(' ', start, end) + 1
-        chunks.append(full_text[start:end])
-        start = end - overlap
+    current_chunk = []
+    current_chunk_length = 0
+    for sentence in sentences:
+        sentence_length = len(sentence)
+        if current_chunk_length + sentence_length > chunk_size:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = [sentence]
+            current_chunk_length = sentence_length
+        else:
+            current_chunk.append(sentence)
+            current_chunk_length += sentence_length
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    # Adjust overlap by appending part of the previous chunk to the next chunk
+    for i in range(1, len(chunks)):
+        overlap_chunk = chunks[i-1].split()[-overlap:]  # Get the last `overlap` words from the previous chunk
+        chunks[i] = " ".join(overlap_chunk) + " " + chunks[i]
     logging.info(f"Document split into {len(chunks):,} chunks. Chunk size: {chunk_size:,}, Overlap: {overlap:,}")
-    processed_chunks = await process_chunks(chunks, check_if_valid_english, reformat_as_markdown, suppress_headers_and_page_numbers)
+    processed_chunks = await process_chunks(chunks, reformat_as_markdown, suppress_headers_and_page_numbers)
     final_text = "".join(processed_chunks)
     logging.info(f"Size of text after combining chunks: {len(final_text):,} characters")
     logging.info(f"Document processing complete. Final text length: {len(final_text):,} characters")
     return final_text
 
-async def smart_post_process_output(text: str, chunk_size: int = 5000) -> str:
-    chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-
-    async def process_chunk(chunk, index):
-        prompt = f"""Review and refine the following text chunk ({index+1}/{len(chunks)}), focusing on improving its formatting and readability. Follow these guidelines:
-
-        1. Ensure proper Markdown formatting:
-           - Headers should be on their own lines with appropriate spacing before and after.
-           - Maintain consistent indentation for list items and code blocks.
-
-        2. Fix any formatting inconsistencies:
-           - Remove unnecessary line breaks within paragraphs.
-           - Ensure there's a blank line between paragraphs and different sections.
-
-        3. Correct punctuation and spacing:
-           - Remove any double periods.
-           - Ensure proper spacing after periods, commas, and other punctuation marks.
-
-        4. Preserve the original content and meaning of the text.
-
-        5. Do not add any new content or remove any existing content.
-
-        6. Ensure smooth transitions between chunks.
-
-        IMPORTANT: Provide ONLY the refined text chunk without any introduction, explanation, or metadata.
-
-        Text chunk to process:
-
-        {chunk}
-
-        Refined text chunk:
-        """
-
-        refined_chunk = await generate_completion(prompt, max_tokens=len(chunk) + 500)
-        
-        if 0:
-            # Apply some basic checks as a fallback
-            refined_chunk = re.sub(r'\.{2,}', '.', refined_chunk)  # Remove any remaining double periods
-            refined_chunk = re.sub(r'(?<=[.!?])(?=[A-Z])', ' ', refined_chunk)  # Ensure space after sentence-ending punctuation
-            
-        return index, refined_chunk.strip()
-
-    # Process all chunks in parallel
-    results = await asyncio.gather(*[process_chunk(chunk, i) for i, chunk in enumerate(chunks)])
-    
-    # Sort results by index and join
-    processed_chunks = [chunk for _, chunk in sorted(results, key=lambda x: x[0])]
-    result = "\n\n".join(processed_chunks)
-
-    # Final pass to ensure consistency across the entire document
-    final_prompt = f"""Review the entire processed document for overall consistency and make any final adjustments:
-
-    1. Ensure consistent formatting throughout the document.
-    2. Fix any remaining punctuation or spacing issues.
-    3. Do not add any new content or remove any existing content.
-    4. Do not add any introductions, explanations, or metadata.
-
-    IMPORTANT: Provide ONLY the final refined document without any introduction or explanation.
-
-    Here's a sample of the document (it may be truncated):
-    {result[:10000]}
-
-    Final refined document:
-    """
-
-    final_result = await generate_completion(final_prompt, max_tokens=len(result) + 500)
-
-    return final_result.strip()
-
-async def smart_remove_duplicates(text: str, chunk_size: int = 5000, overlap: int = 500) -> str:
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        if end < len(text):
-            end = text.rfind('\n', start + chunk_size - overlap, end) + 1
-        chunks.append(text[start:end])
-        start = end - overlap
-
-    async def process_chunk(chunk, index, prev_chunk, next_chunk):
-        context = f"{prev_chunk[-200:]}\n\n{chunk}\n\n{next_chunk[:200]}"
-        prompt = f"""Review the following text chunk and its surrounding context. Remove ONLY obviously duplicated content that appears to have been accidentally included twice. Follow these strict guidelines:
-
-        1. Remove only exact or near-exact repeated paragraphs or sections within the main chunk.
-        2. Consider the context (before and after the main chunk) to identify duplicates that span chunk boundaries.
-        3. Do not remove content that is simply similar but conveys different information.
-        4. Preserve all unique content, even if it seems redundant.
-        5. Ensure the text flows smoothly after removing duplicates.
-        6. Do not add any new content or explanations.
-        7. If no obvious duplicates are found, return the main chunk unchanged.
-        8. When removing a duplicate, include a comment: [DUPLICATE REMOVED] to mark where content was deleted.
-
-        IMPORTANT: Process and return ONLY the main chunk (between the --- markers). Do not modify the context sections.
-
-        Context and text chunk to process:
-
-        {context}
-
-        De-duplicated main chunk (only return the part between the --- markers):
-        """
-
-        de_duped_chunk = await generate_completion(prompt, max_tokens=len(chunk) + 500)
-        
-        # Extract only the main chunk from the response
-        main_chunk_start = de_duped_chunk.find("---")
-        main_chunk_end = de_duped_chunk.rfind("---")
-        if main_chunk_start != -1 and main_chunk_end != -1:
-            de_duped_chunk = de_duped_chunk[main_chunk_start+3:main_chunk_end].strip()
-        
-        return index, de_duped_chunk
-
-    # Process all chunks in parallel
-    tasks = []
-    for i, chunk in enumerate(chunks):
-        prev_chunk = chunks[i-1] if i > 0 else ""
-        next_chunk = chunks[i+1] if i < len(chunks) - 1 else ""
-        tasks.append(process_chunk(chunk, i, prev_chunk, next_chunk))
-    
-    results = await asyncio.gather(*tasks)
-    
-    # Sort results by index and join
-    processed_chunks = [chunk for _, chunk in sorted(results, key=lambda x: x[0])]
-    
-    # Remove overlap
-    final_chunks = []
-    for i, chunk in enumerate(processed_chunks):
-        if i < len(processed_chunks) - 1:
-            next_chunk = processed_chunks[i+1]
-            overlap_end = next_chunk.find('\n', overlap) + 1
-            chunk = chunk[:-overlap] + next_chunk[:overlap_end]
-        final_chunks.append(chunk)
-    
-    result = "".join(final_chunks)
-
-    return result.strip()
-
-def check_deduplication_safety(original_text: str, de_duped_text: str, max_removal_percentage: float = 20.0):
-    original_length = len(original_text)
-    de_duped_length = len(de_duped_text)
-    removed_percentage = ((original_length - de_duped_length) / original_length) * 100 if original_length > 0 else 0
-    
-    if removed_percentage > max_removal_percentage:
-        logging.warning(f"Deduplication removed {removed_percentage:.2f}% of content, which exceeds the safety threshold of {max_removal_percentage}%.")
-        logging.warning("Reverting to original text to prevent excessive content loss.")
-        return original_text
-    return de_duped_text
+def remove_corrected_text_header(text):
+    return text.replace("# Corrected text\n", "").replace("# Corrected text:", "").replace("\nCorrected text", "").replace("Corrected text:", "")
 
 async def assess_output_quality(original_text, processed_text):
-    # Limit the input text to avoid exceeding token limits
-    max_chars = 8000
-    original_sample = original_text[:max_chars]
-    processed_sample = processed_text[:max_chars]
+    max_chars = 15000  # Limit to avoid exceeding token limits
+    available_chars_per_text = max_chars // 2  # Split equally between original and processed
+
+    original_sample = original_text[:available_chars_per_text]
+    processed_sample = processed_text[:available_chars_per_text]
     
     prompt = f"""Compare the following samples of original OCR text with the processed output and assess the quality of the processing. Consider the following factors:
 1. Accuracy of error correction
@@ -938,7 +588,7 @@ SCORE: [Your score]
 EXPLANATION: [Your explanation]
 """
 
-    response = await generate_completion(prompt, max_tokens=300)
+    response = await generate_completion(prompt, max_tokens=1000)
     
     try:
         lines = response.strip().split('\n')
@@ -952,7 +602,7 @@ EXPLANATION: [Your explanation]
         logging.error(f"Error parsing quality assessment response: {e}")
         logging.error(f"Raw response: {response}")
         return None, None
-
+    
 async def main():
     try:
         # Suppress HTTP request logs
@@ -960,12 +610,8 @@ async def main():
         input_pdf_file_path = '160301289-Warren-Buffett-Katharine-Graham-Letter.pdf'
         max_test_pages = 0
         skip_first_n_pages = 0
-        starting_hallucination_similarity_threshold = 0.40
-        check_if_valid_english = False
         reformat_as_markdown = True
         suppress_headers_and_page_numbers = True
-        sentence_embeddings_db_path = "./sentence_embeddings.sqlite"
-        test_filtering_hallucinations = False
         
         # Download the model if using local LLM
         if USE_LOCAL_LLM:
@@ -979,71 +625,41 @@ async def main():
         base_name = os.path.splitext(input_pdf_file_path)[0]
         output_extension = '.md' if reformat_as_markdown else '.txt'
         
-        if not test_filtering_hallucinations:
-            list_of_scanned_images = convert_pdf_to_images(input_pdf_file_path, max_test_pages, skip_first_n_pages)
-            logging.info(f"Tesseract version: {pytesseract.get_tesseract_version()}")
-            logging.info("Extracting text from converted pages...")
-            with ThreadPoolExecutor() as executor:
-                list_of_extracted_text_strings = list(executor.map(ocr_image, list_of_scanned_images))
-            logging.info("Done extracting text from converted pages.")
-            raw_ocr_output = "\n".join(list_of_extracted_text_strings)
-            raw_ocr_output_file_path = f"{base_name}__raw_ocr_output.txt"
-            with open(raw_ocr_output_file_path, "w") as f:
-                f.write(raw_ocr_output)
-            
-            logging.info("Processing document...")
-            final_text = await process_document(list_of_extracted_text_strings, check_if_valid_english, reformat_as_markdown, suppress_headers_and_page_numbers)            
-            
-            # Save the pre-filtered output
-            pre_filtered_output_file_path = base_name + '_pre_filtered' + output_extension
-            with open(pre_filtered_output_file_path, 'w') as f:
-                f.write(final_text)
-            logging.info(f"Pre-filtered LLM corrected text written to: {pre_filtered_output_file_path}")
-            logging.info(f"First 500 characters of pre-filtered processed text:\n{final_text[:500]}...")
-        else:  # For debugging
-            raw_ocr_output_file_path = f"{base_name}__raw_ocr_output.txt"        
-            pre_filtered_output_file_path = base_name + '_pre_filtered' + output_extension
-            with open(pre_filtered_output_file_path, 'r') as f:
-                final_text = f.read()
-            with open(raw_ocr_output_file_path, 'r') as f:
-                raw_ocr_output = f.read()
+        raw_ocr_output_file_path = f"{base_name}__raw_ocr_output.txt"
+        llm_corrected_output_file_path = base_name + '_llm_corrected' + output_extension
 
-        # New step: Remove duplicates
-        logging.info('Removing duplicate content...')
-        de_duped_text = await smart_remove_duplicates(final_text)
-        logging.info('Done removing duplicates.')
+        list_of_scanned_images = convert_pdf_to_images(input_pdf_file_path, max_test_pages, skip_first_n_pages)
+        logging.info(f"Tesseract version: {pytesseract.get_tesseract_version()}")
+        logging.info("Extracting text from converted pages...")
+        with ThreadPoolExecutor() as executor:
+            list_of_extracted_text_strings = list(executor.map(ocr_image, list_of_scanned_images))
+        logging.info("Done extracting text from converted pages.")
+        raw_ocr_output = "\n".join(list_of_extracted_text_strings)
+        with open(raw_ocr_output_file_path, "w") as f:
+            f.write(raw_ocr_output)
+        logging.info(f"Raw OCR output written to: {raw_ocr_output_file_path}")
 
-        de_duped_text = check_deduplication_safety(final_text, de_duped_text)
+        logging.info("Processing document...")
+        final_text = await process_document(list_of_extracted_text_strings, reformat_as_markdown, suppress_headers_and_page_numbers)            
+        cleaned_text = remove_corrected_text_header(final_text)
+        
+        # Save the LLM corrected output
+        with open(llm_corrected_output_file_path, 'w') as f:
+            f.write(cleaned_text)
+        logging.info(f"LLM Corrected text written to: {llm_corrected_output_file_path}") 
 
-        # Save the de-duplicated output
-        deduped_output_file_path = base_name + '_deduped' + output_extension
-        with open(deduped_output_file_path, 'w') as f:
-            f.write(de_duped_text)
-        logging.info(f"De-duplicated text written to: {deduped_output_file_path}")
-        
-        logging.info('Now filtering out hallucinations from de-duplicated text...')
-        filtered_output = await filter_hallucinations(de_duped_text, raw_ocr_output, starting_hallucination_similarity_threshold, input_pdf_file_path, sentence_embeddings_db_path)
-        logging.info('Done filtering out hallucinations.')
-        
-        logging.info('Post-processing the filtered output...')
-        post_processed_output = await smart_post_process_output(filtered_output)
-        logging.info('Done post-processing.')
-        
-        final_output_file_path = base_name + '_post_filtered' + output_extension
-        with open(final_output_file_path, 'w') as f:
-            f.write(post_processed_output)
-        logging.info(f"Post-filtered text written to: {final_output_file_path}")
-        logging.info(f"First 500 characters of post-filtered text:\n{post_processed_output[:500]}...")
+        if final_text:
+            logging.info(f"First 500 characters of LLM corrected processed text:\n{final_text[:500]}...")
+        else:
+            logging.warning("final_text is empty or not defined.")
 
         logging.info(f"Done processing {input_pdf_file_path}.")
         logging.info("\nSee output files:")
         logging.info(f" Raw OCR: {raw_ocr_output_file_path}")
-        logging.info(f" Pre-filtered LLM Corrected: {pre_filtered_output_file_path}")
-        logging.info(f" De-duplicated: {deduped_output_file_path}")
-        logging.info(f" Post-filtered LLM Corrected: {final_output_file_path}")
+        logging.info(f" LLM Corrected: {llm_corrected_output_file_path}")
 
         # Perform a final quality check
-        quality_score, explanation = await assess_output_quality(raw_ocr_output, filtered_output)
+        quality_score, explanation = await assess_output_quality(raw_ocr_output, final_text)
         if quality_score is not None:
             logging.info(f"Final quality score: {quality_score}/100")
             logging.info(f"Explanation: {explanation}")
@@ -1052,6 +668,6 @@ async def main():
     except Exception as e:
         logging.error(f"An error occurred in the main function: {e}")
         logging.error(traceback.format_exc())
-
+        
 if __name__ == '__main__':
     asyncio.run(main())

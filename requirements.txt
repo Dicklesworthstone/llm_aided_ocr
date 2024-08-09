@@ -1,10 +1,7 @@
 anthropic
-faiss-cpu
 filelock
-httpx
 langdetect
 llama-cpp-python
-nltk
 numpy
 nvgpu
 openai
