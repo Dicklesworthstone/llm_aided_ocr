@@ -165,11 +165,11 @@ async def generate_completion(prompt: str, max_tokens: int = 5000) -> Optional[s
         return None
 
 def get_tokenizer(model_name: str):
-    if model_name.startswith("gpt-"):
+    if model_name.lower().startswith("gpt-"):
         return tiktoken.encoding_for_model(model_name)
-    elif model_name.startswith("claude-"):
+    elif model_name.lower().startswith("claude-"):
         return AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", clean_up_tokenization_spaces=False)
-    elif model_name.startswith("llama-"):
+    elif model_name.lower().startswith("llama-"):
         return AutoTokenizer.from_pretrained("huggyllama/llama-7b", clean_up_tokenization_spaces=False)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
