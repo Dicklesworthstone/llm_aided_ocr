@@ -8,9 +8,9 @@ The LLM-Aided OCR Project is an advanced system designed to significantly enhanc
 
 To see what the LLM-Aided OCR Project can do, check out these example outputs:
 
-- [Original PDF](example_input.pdf) 
-- [Raw OCR Output](example_input__raw_ocr_output.txt)
-- [LLM-Corrected Markdown Output](example_input_llm_corrected.md)
+- [Original PDF](https://github.com/Dicklesworthstone/llm_aided_ocr/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter.pdf) 
+- [Raw OCR Output](https://github.com/Dicklesworthstone/llm_aided_ocr/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt)
+- [LLM-Corrected Markdown Output](https://github.com/Dicklesworthstone/llm_aided_ocr/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter_llm_corrected.md)
 
 ## Features
 
