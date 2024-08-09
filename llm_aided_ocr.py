@@ -31,7 +31,7 @@ except ImportError:
 config = DecoupleConfig(RepositoryEnv('.env'))
 
 USE_LOCAL_LLM = config.get("USE_LOCAL_LLM", default=False, cast=bool)
-API_PROVIDER = config.get("API_PROVIDER", default="CLAUDE", cast=str) # OPENAI or CLAUDE
+API_PROVIDER = config.get("API_PROVIDER", default="OPENAI", cast=str) # OPENAI or CLAUDE
 ANTHROPIC_API_KEY = config.get("ANTHROPIC_API_KEY", default="your-anthropic-api-key", cast=str)
 OPENAI_API_KEY = config.get("OPENAI_API_KEY", default="your-openai-api-key", cast=str)
 CLAUDE_MODEL_STRING = config.get("CLAUDE_MODEL_STRING", default="claude-3-haiku-20240307", cast=str)
@@ -527,26 +527,42 @@ async def process_document(list_of_extracted_text_strings: List[str], reformat_a
     logging.info(f"Starting document processing. Total pages: {len(list_of_extracted_text_strings):,}")
     full_text = "\n\n".join(list_of_extracted_text_strings)
     logging.info(f"Size of full text before processing: {len(full_text):,} characters")
-    chunk_size, overlap = 2000, 10 
-    sentences = re.split(r'(?<=[.!?])\s+', full_text)  # Split on sentence boundaries
+    chunk_size, overlap = 4000, 10
+    # Improved chunking logic
+    paragraphs = re.split(r'\n\s*\n', full_text)
     chunks = []
     current_chunk = []
     current_chunk_length = 0
-    for sentence in sentences:
-        sentence_length = len(sentence)
-        if current_chunk_length + sentence_length > chunk_size:
-            chunks.append(" ".join(current_chunk))
-            current_chunk = [sentence]
-            current_chunk_length = sentence_length
+    for paragraph in paragraphs:
+        paragraph_length = len(paragraph)
+        if current_chunk_length + paragraph_length <= chunk_size:
+            current_chunk.append(paragraph)
+            current_chunk_length += paragraph_length
         else:
-            current_chunk.append(sentence)
-            current_chunk_length += sentence_length
+            # If adding the whole paragraph exceeds the chunk size,
+            # we need to split the paragraph into sentences
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+            sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+            current_chunk = []
+            current_chunk_length = 0
+            for sentence in sentences:
+                sentence_length = len(sentence)
+                if current_chunk_length + sentence_length <= chunk_size:
+                    current_chunk.append(sentence)
+                    current_chunk_length += sentence_length
+                else:
+                    if current_chunk:
+                        chunks.append(" ".join(current_chunk))
+                    current_chunk = [sentence]
+                    current_chunk_length = sentence_length
+    # Add any remaining content as the last chunk
     if current_chunk:
-        chunks.append(" ".join(current_chunk))
-    # Adjust overlap by appending part of the previous chunk to the next chunk
+        chunks.append("\n\n".join(current_chunk) if len(current_chunk) > 1 else current_chunk[0])
+    # Add overlap between chunks
     for i in range(1, len(chunks)):
-        overlap_chunk = chunks[i-1].split()[-overlap:]  # Get the last `overlap` words from the previous chunk
-        chunks[i] = " ".join(overlap_chunk) + " " + chunks[i]
+        overlap_text = chunks[i-1].split()[-overlap:]
+        chunks[i] = " ".join(overlap_text) + " " + chunks[i]
     logging.info(f"Document split into {len(chunks):,} chunks. Chunk size: {chunk_size:,}, Overlap: {overlap:,}")
     processed_chunks = await process_chunks(chunks, reformat_as_markdown, suppress_headers_and_page_numbers)
     final_text = "".join(processed_chunks)
