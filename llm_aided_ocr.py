@@ -527,7 +527,7 @@ async def process_document(list_of_extracted_text_strings: List[str], reformat_a
     logging.info(f"Starting document processing. Total pages: {len(list_of_extracted_text_strings):,}")
     full_text = "\n\n".join(list_of_extracted_text_strings)
     logging.info(f"Size of full text before processing: {len(full_text):,} characters")
-    chunk_size, overlap = 4000, 10
+    chunk_size, overlap = 8000, 10
     # Improved chunking logic
     paragraphs = re.split(r'\n\s*\n', full_text)
     chunks = []
