@@ -107,35 +107,11 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
    - Compares original OCR text with processed output
    - Uses LLM to provide a quality score and explanation
 
-### Artifact Handling
-
-The code includes a sophisticated artifact handling system, which is used for managing substantial, self-contained content. This system is particularly useful for creating and referencing large blocks of text or code that might be modified or reused.
-
 ### Logging and Error Handling
 
 - Comprehensive logging throughout the codebase
 - Detailed error messages and stack traces for debugging
 - Suppresses HTTP request logs to reduce noise
-
-## Advanced Features and Optimizations
-
-1. **GPU Acceleration**
-   - Function: `is_gpu_available()`
-   - Checks for GPU availability and VRAM capacity
-   - Attempts to use GPU for local LLM inference when available
-
-2. **Model Download**
-   - Function: `download_models()`
-   - Asynchronously downloads required model files
-   - Implements file locking to prevent concurrent downloads
-
-3. **Chunk Processing Optimization**
-   - Implements both sequential and concurrent chunk processing
-   - Uses `ThreadPoolExecutor` for parallel OCR processing of images
-
-4. **Adaptive Processing**
-   - Adjusts processing based on input size and available resources
-   - Implements chunking for large documents that exceed token limits
 
 ## Configuration and Customization
 
