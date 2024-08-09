@@ -480,7 +480,7 @@ Corrected text:
 5. Preserve all original content and meaning
 6. Do not add any extra punctuation or modify the existing punctuation
 7. Remove any spuriously inserted introductory text such as "Here is the corrected text:" that may have been added by the LLM and which is obviously not part of the original text.
-8. Remove and obviously duplicated content that appears to have been accidentally included twice. Follow these strict guidelines:
+8. Remove any obviously duplicated content that appears to have been accidentally included twice. Follow these strict guidelines:
    - Remove only exact or near-exact repeated paragraphs or sections within the main chunk.
    - Consider the context (before and after the main chunk) to identify duplicates that span chunk boundaries.
    - Do not remove content that is simply similar but conveys different information.
