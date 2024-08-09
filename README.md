@@ -1,4 +1,4 @@
-# LLM-Aided OCR Project: In-Depth Technical Overview
+# LLM-Aided OCR Project
 
 ## Introduction
 
