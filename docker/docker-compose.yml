@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  llm_aided_ocr:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      args: 
+        CACHEBUST: 1
+        CONDA_ENV_NAME: "llmocr"
+        PYTHON_VERSION: "3.12"
+        TAG_VERSION: "12.1.1"
+        USE_LOCAL_LLM: True
+        # API_PROVIDER: "OPENAI"
+        # OPENAI_API_KEY: "your_openai_api_key"
+        # ANTHROPIC_API_KEY: "your_anthropic_api_key"
+        LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS: ""
+    volumes:
+      - ./results:/results
+    container_name: llm_aided_ocr
+    pull_policy: if_not_present
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    restart: unless-stopped
+    image: hotwa/llm_aided_ocr:latest
+    privileged: true
+    cap_add:
+      - ALL
+    shm_size: '32gb'
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      # - NVIDIA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+    # network_mode: host
+    command: ["/usr/sbin/sshd", "-D"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # count: all
+              capabilities: ["gpu"]
+              device_ids: ["2"]
+    ports:
+      - "3232:22"
+    networks:
+      - bridge_network
+
+networks:
+  bridge_network:
+    driver: bridge
