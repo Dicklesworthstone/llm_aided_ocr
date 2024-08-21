@@ -346,7 +346,7 @@ async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -
             logging.error(f"An error occurred while requesting from OpenAI API: {e}")
             return None
 
-async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7, grammar_file_string: str = None):
+async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7, grammar_file_string: str = None) -> Optional[str]:
     logging.info(f"Starting text completion using model: '{llm_model_name}' for input prompt: '{input_prompt}'")
     llm = load_model(llm_model_name)
     prompt_tokens = estimate_tokens(input_prompt, llm_model_name)
@@ -396,11 +396,7 @@ async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: 
         finish_reason = str(output['choices'][0]['finish_reason'])
         llm_model_usage_json = json.dumps(output['usage'])
         logging.info(f"Completed text completion in {output['usage']['total_time']:.2f} seconds. Beginning of generated text: \n'{generated_text[:150]}'...")
-        return {
-            "generated_text": generated_text,
-            "finish_reason": finish_reason,
-            "llm_model_usage_json": llm_model_usage_json
-        }
+        return generated_text
 
 # Image Processing Functions
 def preprocess_image(image):
