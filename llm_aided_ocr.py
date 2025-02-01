@@ -1,3 +1,5 @@
+#! /usr/bin/env pkgx +python@3.11 +poppler.freedesktop.org +tesseract-ocr.github.io uv run --with anthropic --with filelock --with langdetect --with numpy==1.26.4 --with llama-cpp-python --with nvgpu --with openai --with opencv-python-headless --with pdf2image --with pillow --with pytesseract --with python-decouple --with ruff --with scikit-learn --with tiktoken --with transformers
+
 import os
 import glob
 import traceback
