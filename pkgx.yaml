@@ -1,0 +1,4 @@
+dependencies:
+  - python@3.11
+  - poppler.freedesktop.org
+  - tesseract-ocr.github.io
