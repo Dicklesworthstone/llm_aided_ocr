@@ -821,9 +821,24 @@ EXPLANATION: [Your explanation]
 
 async def main():
     try:
+        # Check if PDF file argument is provided
+        if len(sys.argv) < 2:
+            print("Usage: ./llm_aided_ocr.py <pdf_file>")
+            sys.exit(1)
+
+        # Get PDF file path from command line argument
+        input_pdf_file_path = sys.argv[1]
+
+        # Verify file exists and is a PDF
+        if not os.path.exists(input_pdf_file_path):
+            print(f"Error: File '{input_pdf_file_path}' not found")
+            sys.exit(1)
+        if not input_pdf_file_path.lower().endswith(".pdf"):
+            print(f"Error: File '{input_pdf_file_path}' is not a PDF")
+            sys.exit(1)
+
         # Suppress HTTP request logs
         logging.getLogger("httpx").setLevel(logging.WARNING)
-        input_pdf_file_path = "160301289-Warren-Buffett-Katharine-Graham-Letter.pdf"
         max_test_pages = 0
         skip_first_n_pages = 0
         reformat_as_markdown = True
@@ -899,5 +914,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    print("Starting main function")
     asyncio.run(main())
