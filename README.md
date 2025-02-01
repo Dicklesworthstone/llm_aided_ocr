@@ -8,7 +8,7 @@ The LLM-Aided OCR Project is an advanced system designed to significantly enhanc
 
 To see what the LLM-Aided OCR Project can do, check out these example outputs:
 
-- [Original PDF](https://github.com/Dicklesworthstone/llm_aided_ocr/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter.pdf) 
+- [Original PDF](https://github.com/Dicklesworthstone/llm_aided_ocr/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter.pdf)
 - [Raw OCR Output](https://github.com/Dicklesworthstone/llm_aided_ocr/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt)
 - [LLM-Corrected Markdown Output](https://github.com/Dicklesworthstone/llm_aided_ocr/blob/main/160301289-Warren-Buffett-Katharine-Graham-Letter_llm_corrected.md)
 
@@ -31,6 +31,7 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
 ### PDF Processing and OCR
 
 1. **PDF to Image Conversion**
+
    - Function: `convert_pdf_to_images()`
    - Uses `pdf2image` library to convert PDF pages into images
    - Supports processing a subset of pages with `max_pages` and `skip_first_n_pages` parameters
@@ -46,21 +47,24 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
 ### Text Processing Pipeline
 
 1. **Chunk Creation**
+
    - The `process_document()` function splits the full text into manageable chunks
    - Uses sentence boundaries for natural splits
    - Implements an overlap between chunks to maintain context
 
 2. **Error Correction and Formatting**
+
    - Core function: `process_chunk()`
    - Two-step process:
      a. OCR Correction:
-        - Uses LLM to fix OCR-induced errors
-        - Maintains original structure and content
-     b. Markdown Formatting (optional):
-        - Converts text to proper markdown format
-        - Handles headings, lists, emphasis, and more
+     - Uses LLM to fix OCR-induced errors
+     - Maintains original structure and content
+       b. Markdown Formatting (optional):
+     - Converts text to proper markdown format
+     - Handles headings, lists, emphasis, and more
 
 3. **Duplicate Content Removal**
+
    - Implemented within the markdown formatting step
    - Identifies and removes exact or near-exact repeated paragraphs
    - Preserves unique content and ensures text flow
@@ -71,15 +75,18 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
 ### LLM Integration
 
 1. **Flexible LLM Support**
+
    - Supports both local LLMs and cloud-based API providers (OpenAI, Anthropic)
    - Configurable through environment variables
 
 2. **Local LLM Handling**
+
    - Function: `generate_completion_from_local_llm()`
    - Uses `llama_cpp` library for local LLM inference
    - Supports custom grammars for structured output
 
 3. **API-based LLM Handling**
+
    - Functions: `generate_completion_from_claude()` and `generate_completion_from_openai()`
    - Implements proper error handling and retry logic
    - Manages token limits and adjusts request sizes dynamically
@@ -91,6 +98,7 @@ To see what the LLM-Aided OCR Project can do, check out these example outputs:
 ### Token Management
 
 1. **Token Estimation**
+
    - Function: `estimate_tokens()`
    - Uses model-specific tokenizers when available
    - Falls back to `approximate_tokens()` for quick estimation
@@ -139,6 +147,32 @@ The script generates detailed logs of the entire process, including timing infor
 - Anthropic API (optional)
 - Local LLM support (optional, requires compatible GGUF model)
 
+## Installation and Usage with pkgx
+
+1. Copy the `.env.example` file to `.env` and fill in your API keys:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Install pkgx:
+
+   ```bash
+   curl -fsS https://pkgx.sh | sh
+   ```
+
+3. Make `llm_aided_ocr.py` executable:
+
+   ```bash
+   chmod +x llm_aided_ocr.py
+   ```
+
+4. Run the script:
+
+   ```bash
+   ./llm_aided_ocr.py <pdf_file>
+   ```
+
 ## Installation
 
 1. Install Pyenv and Python 3.12 (if needed):
@@ -165,8 +199,8 @@ pyenv install 3.12
 
 ```bash
 # Use pyenv to create virtual environment:
-git clone https://github.com/Dicklesworthstone/llm_aided_ocr    
-cd llm_aided_ocr          
+git clone https://github.com/Dicklesworthstone/llm_aided_ocr
+cd llm_aided_ocr
 pyenv local 3.12
 python -m venv venv
 source venv/bin/activate
@@ -177,6 +211,7 @@ pip install -r requirements.txt
 ```
 
 3. Install Tesseract OCR engine (if not already installed):
+
    - For Ubuntu: `sudo apt-get install tesseract-ocr`
    - For macOS: `brew install tesseract`
    - For Windows: Download and install from [GitHub](https://github.com/UB-Mannheim/tesseract/wiki)
@@ -193,14 +228,13 @@ pip install -r requirements.txt
 
 1. Place your PDF file in the project directory.
 
-2. Update the `input_pdf_file_path` variable in the `main()` function with your PDF filename.
+2. Run the script:
 
-3. Run the script:
    ```
-   python llm_aided_ocr.py
+   python llm_aided_ocr.py <llm_aided_ocr.py>
    ```
 
-4. The script will generate several output files, including the final post-processed text.
+3. The script will generate several output files, including the final post-processed text.
 
 ## How It Works
 
@@ -253,3 +287,5 @@ Contributions to this project are welcome! Please fork the repository and submit
 ## License
 
 This project is licensed under the MIT License.
+
+[`pkgx`]: https://pkgx.sh
