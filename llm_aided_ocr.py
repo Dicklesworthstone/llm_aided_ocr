@@ -311,17 +311,18 @@ async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -
         logging.error("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
         return None
     prompt_tokens = estimate_tokens(prompt, OPENAI_COMPLETION_MODEL)
-    adjusted_max_tokens = min(max_tokens, 4096 - prompt_tokens - TOKEN_BUFFER)  # 4096 is typical max for GPT-3.5 and GPT-4
-    if adjusted_max_tokens <= 0:
+    adjusted_max_tokens = max(1, min(max_tokens, 4096 - prompt_tokens - TOKEN_BUFFER))  # 4096 is typical max for GPT-3.5 and GPT-4
+    if adjusted_max_tokens <= 1 and prompt_tokens >= 4096 - TOKEN_BUFFER:
         logging.warning("Prompt is too long for OpenAI API. Chunking the input.")
-        chunks = chunk_text(prompt, OPENAI_MAX_TOKENS - TOKEN_CUSHION, OPENAI_COMPLETION_MODEL) 
+        chunks = chunk_text(prompt, OPENAI_MAX_TOKENS - TOKEN_CUSHION, OPENAI_COMPLETION_MODEL)
         results = []
+        chunk_max_tokens = max(1, 4096 // 2)  # Use reasonable max_tokens for chunks
         for chunk in chunks:
             try:
                 response = await openai_client.chat.completions.create(
                     model=OPENAI_COMPLETION_MODEL,
                     messages=[{"role": "user", "content": chunk}],
-                    max_tokens=adjusted_max_tokens,
+                    max_tokens=chunk_max_tokens,
                     temperature=0.7,
                 )
                 result = response.choices[0].message.content
@@ -329,7 +330,7 @@ async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -
                 logging.info(f"Chunk processed. Output tokens: {response.usage.completion_tokens:,}")
             except Exception as e:
                 logging.error(f"An error occurred while processing a chunk: {e}")
-        return " ".join(results)
+        return " ".join(results) if results else None
     else:
         try:
             response = await openai_client.chat.completions.create(
@@ -346,12 +347,12 @@ async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -
             logging.error(f"An error occurred while requesting from OpenAI API: {e}")
             return None
 
-async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7, grammar_file_string: str = None):
+async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: str, number_of_tokens_to_generate: int = 100, temperature: float = 0.7, grammar_file_string: str = None) -> Optional[str]:
     logging.info(f"Starting text completion using model: '{llm_model_name}' for input prompt: '{input_prompt}'")
     llm = load_model(llm_model_name)
     prompt_tokens = estimate_tokens(input_prompt, llm_model_name)
-    adjusted_max_tokens = min(number_of_tokens_to_generate, LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS - prompt_tokens - TOKEN_BUFFER)
-    if adjusted_max_tokens <= 0:
+    adjusted_max_tokens = max(1, min(number_of_tokens_to_generate, LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS - prompt_tokens - TOKEN_BUFFER))
+    if adjusted_max_tokens <= 1 and prompt_tokens >= LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS - TOKEN_BUFFER:
         logging.warning("Prompt is too long for LLM. Chunking the input.")
         chunks = chunk_text(input_prompt, LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS - TOKEN_CUSHION, llm_model_name)
         results = []
@@ -366,7 +367,7 @@ async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: 
                 logging.info(f"Chunk processed. Output tokens: {output['usage']['completion_tokens']:,}")
             except Exception as e:
                 logging.error(f"An error occurred while processing a chunk: {e}")
-        return " ".join(results)
+        return " ".join(results) if results else None
     else:
         grammar_file_string_lower = grammar_file_string.lower() if grammar_file_string else ""
         if grammar_file_string_lower:
@@ -396,11 +397,8 @@ async def generate_completion_from_local_llm(llm_model_name: str, input_prompt: 
         finish_reason = str(output['choices'][0]['finish_reason'])
         llm_model_usage_json = json.dumps(output['usage'])
         logging.info(f"Completed text completion in {output['usage']['total_time']:.2f} seconds. Beginning of generated text: \n'{generated_text[:150]}'...")
-        return {
-            "generated_text": generated_text,
-            "finish_reason": finish_reason,
-            "llm_model_usage_json": llm_model_usage_json
-        }
+        logging.debug(f"Finish reason: {finish_reason}, Usage: {llm_model_usage_json}")
+        return generated_text
 
 # Image Processing Functions
 def preprocess_image(image):
@@ -465,7 +463,12 @@ Corrected text:
 """
     
     ocr_corrected_chunk = await generate_completion(ocr_correction_prompt, max_tokens=len(chunk) + 500)
-    
+
+    # Handle None return from generate_completion - fall back to original chunk
+    if ocr_corrected_chunk is None:
+        logging.warning(f"OCR correction failed for chunk {chunk_index + 1}, using original text")
+        ocr_corrected_chunk = chunk
+
     processed_chunk = ocr_corrected_chunk
 
     # Step 2: Markdown Formatting (if requested)
@@ -496,8 +499,13 @@ Text to reformat:
 
 Reformatted markdown:
 """
-        processed_chunk = await generate_completion(markdown_prompt, max_tokens=len(ocr_corrected_chunk) + 500)
-    new_context = processed_chunk[-1000:]  # Use the last 1000 characters as context for the next chunk
+        markdown_result = await generate_completion(markdown_prompt, max_tokens=len(ocr_corrected_chunk) + 500)
+        if markdown_result is not None:
+            processed_chunk = markdown_result
+        else:
+            logging.warning(f"Markdown formatting failed for chunk {chunk_index + 1}, using OCR-corrected text")
+
+    new_context = processed_chunk[-1000:] if processed_chunk else ""  # Use the last 1000 characters as context for the next chunk
     logging.info(f"Chunk {chunk_index + 1}/{total_chunks} processed. Output length: {len(processed_chunk):,} characters")
     return processed_chunk, new_context
 
@@ -605,7 +613,11 @@ EXPLANATION: [Your explanation]
 """
 
     response = await generate_completion(prompt, max_tokens=1000)
-    
+
+    if response is None:
+        logging.error("Quality assessment failed: no response from LLM")
+        return None, None
+
     try:
         lines = response.strip().split('\n')
         score_line = next(line for line in lines if line.startswith('SCORE:'))
