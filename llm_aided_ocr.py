@@ -287,7 +287,7 @@ async def generate_completion_from_claude(prompt: str, max_tokens: int = CLAUDE_
                     logging.info(f"Chunk processed. Input tokens: {message.usage.input_tokens:,}, Output tokens: {message.usage.output_tokens:,}")
             except Exception as e:
                 logging.error(f"An error occurred while processing a chunk: {e}")
-        return " ".join(results)
+        return " ".join(results) if results else None
     else:
         try:
             async with client.messages.stream(
