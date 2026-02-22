@@ -252,7 +252,7 @@ Contributions to this project are welcome! Please fork the repository and submit
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License (with OpenAI/Anthropic Rider).
 
 ---
 
