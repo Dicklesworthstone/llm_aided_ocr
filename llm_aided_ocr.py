@@ -1272,23 +1272,122 @@ def clean_raw_ocr_text(text: str, suppress_headers_and_page_numbers: bool = True
     return "\n\n".join(cleaned)
 
 
+def clean_ocr_character_confusions(text: str) -> str:
+    """Deterministically repair high-frequency typewriter/Tesseract character confusions and line-wrap splits."""
+    if not text:
+        return ""
+
+    # 1. Dehyphenate words split across single or double newlines (e.g. 'manage-\nment' or 'mar-\n\nket')
+    cleaned = re.sub(
+        r"([A-Za-z]{2,})-\s*\n(?:\s*\n)?\s*([a-z][A-Za-z]*)",
+        _dehyphenate_line_wrap,
+        text,
+    )
+    # 2. Clean OCR underline-underscore artifacts adjacent to letters (e.g. 'Great_Leap', 'Inherent _in', 'but_for')
+    cleaned = re.sub(
+        r"(?<=[A-Za-z])_(?=[A-Za-z])|\s+_(?=[A-Za-z])|(?<=[A-Za-z])_\s+",
+        " ",
+        cleaned,
+    )
+    # 3. Repair paragraph-leading '(L)' or '(l)' where typewriter lowercase 'l' was used for numeral '1'
+    cleaned = re.sub(r"(?m)^(\s*)\([Ll]\)(?=\s+[A-Z\"'])", r"\1(1)", cleaned)
+    # 4. Repair tilde dash confusions ('~-', '-~', ' ~ ', and intra-word 'non~conventional')
+    cleaned = re.sub(r"\s*(?:~-|-\~)\s*", " - ", cleaned)
+    cleaned = re.sub(r"(?<=\S)[ \t]+~[ \t]+(?=\S)", " - ", cleaned)
+    cleaned = re.sub(r"(?<=[A-Za-z])~(?=[A-Za-z])", "-", cleaned)
+    # 5. Repair S & P 500 symbol confusions ('§ & P 500', '$ & P 500', 'S$ & P 500')
+    cleaned = re.sub(r"(?:S\$|§|\$)\s*&\s*P\s+500\b", "S & P 500", cleaned)
+    # 6. Repair percentage decimal confusions ('+2,8%' -> '+2.8%', '+3 8%' -> '+3.8%')
+    cleaned = re.sub(r"([+\-]?\d+),(\d{1,2})%", r"\1.\2%", cleaned)
+    cleaned = re.sub(r"([+\-]\d+)[ \t]+(\d)%", r"\1.\2%", cleaned)
+    return cleaned
+
+
+_TABLE_3COL_ROW_RE = re.compile(
+    r"^(?P<c1>[A-Za-z][A-Za-z0-9.&' /\-]{1,40}?)\s+"
+    r"(?P<c2>\$?\s*\d[\d,]*(?:\.\d+)?%?|\(\d[\d,]*(?:\.\d+)?%?\))\s+"
+    r"(?P<c3>\$?\s*\d[\d,]*(?:\.\d+)?%?|\(\d[\d,]*(?:\.\d+)?%?\))$"
+)
+_TABLE_2COL_ROW_RE = re.compile(
+    r"^(?P<c1>[A-Za-z][A-Za-z0-9.&' /\-]{1,40}?)\s+"
+    r"(?P<c2>[+\-]?\d+(?:\.\d+)?%|\(\d+(?:\.\d+)?%\)|\$?\d[\d,]*(?:\.\d+)?)$"
+)
+_MONTH_PREFIX_RE = re.compile(
+    r"^(?:January|February|March|April|May|June|July|August|September|October|November|December)\b",
+    re.IGNORECASE,
+)
+
+
+def _format_numeric_table_block(lines: list[str], reformat_as_markdown: bool) -> str | None:
+    """Detect multi-row numeric tables (even when column spaces were collapsed) and format as Markdown tables."""
+    if len(lines) < 2:
+        return None
+
+    norm_lines = [re.sub(r"(\d{1,3}),\s+(\d{3})\b", r"\1,\2", ln.strip()) for ln in lines if ln.strip()]
+    if len(norm_lines) < 2:
+        return None
+
+    # 1. Check 3-column financial table (optional header line + >= 2 data rows)
+    if len(norm_lines) >= 3:
+        row_matches_all = [_TABLE_3COL_ROW_RE.match(ln) for ln in norm_lines]
+        row_matches_tail = [_TABLE_3COL_ROW_RE.match(ln) for ln in norm_lines[1:]]
+        if all(row_matches_tail) and not row_matches_all[0]:
+            if not reformat_as_markdown:
+                return "\n".join(norm_lines)
+            header_line = norm_lines[0]
+            multi_space_cols = [c.strip() for c in re.split(r"\s{2,}", header_line) if c.strip()]
+            if len(multi_space_cols) == 3:
+                h1, h2, h3 = multi_space_cols
+            else:
+                hdr_match = re.match(
+                    r"^(Company|Item|Category|Name|Security)\s+(.+?)\s+([A-Z][A-Za-z]+\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)$",
+                    header_line,
+                )
+                if hdr_match:
+                    h1, h2, h3 = hdr_match.group(1), hdr_match.group(2), hdr_match.group(3)
+                else:
+                    h1, h2, h3 = "Item", "Column 1", "Column 2"
+            md_rows = [f"| {h1} | {h2} | {h3} |", "| :--- | :---: | :---: |"]
+            for m in row_matches_tail:
+                if m is not None:
+                    c1 = m.group("c1").strip()
+                    c2 = re.sub(r"\s+", "", m.group("c2"))
+                    c3 = re.sub(r"\s+", "", m.group("c3"))
+                    md_rows.append(f"| {c1} | {c2} | {c3} |")
+            return "\n".join(md_rows)
+
+    # 2. Check 2-column benchmark/metric table (>= 3 rows of label + percentage/amount)
+    if len(norm_lines) >= 3:
+        matches_2col = [_TABLE_2COL_ROW_RE.match(ln) for ln in norm_lines]
+        if all(matches_2col) and not any(_MONTH_PREFIX_RE.match(ln) for ln in norm_lines):
+            if not reformat_as_markdown:
+                return "\n".join(norm_lines)
+            md_rows = ["| Category | Value |", "| :--- | :---: |"]
+            for m in matches_2col:
+                if m is not None:
+                    md_rows.append(f"| {m.group('c1').strip()} | {m.group('c2').strip()} |")
+            return "\n".join(md_rows)
+
+    # 3. General multi-row tabular fallback (preserve line breaks rather than mashing into prose)
+    if all(len(ln) <= 75 for ln in norm_lines):
+        numeric_end_count = sum(
+            1
+            for ln in norm_lines
+            if not _MONTH_PREFIX_RE.match(ln)
+            and re.search(r"(?:[+\-]?\d[\d,.]*%?|\(\d[\d,.]*%?\))$", ln)
+        )
+        if numeric_end_count >= max(2, len(norm_lines) - 1):
+            return "\n".join(norm_lines)
+
+    return None
+
+
 def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True) -> str:
-    """Deterministically repair typewriter line-wrap hyphenations, underline underscores, and intra-paragraph line breaks."""
+    """Deterministically repair typewriter line-wrap hyphenations, character confusions, tables, and intra-paragraph line breaks."""
     if not text or not text.strip():
         return ""
 
-    # Dehyphenate words split across single or double newlines (e.g. 'manage-\nment' or 'mar-\n\nket')
-    cleaned_input = re.sub(
-        r"([A-Za-z]{2,})-\s*\n(?:\s*\n)?\s*([a-z][A-Za-z]*)",
-        _dehyphenate_line_wrap,
-        text.strip(),
-    )
-    # Clean OCR underline-underscore artifacts adjacent to letters (e.g. 'Great_Leap', 'Inherent _in', 'but_for')
-    cleaned_input = re.sub(
-        r"(?<=[A-Za-z])_(?=[A-Za-z])|\s+_(?=[A-Za-z])|(?<=[A-Za-z])_\s+",
-        " ",
-        cleaned_input,
-    )
+    cleaned_input = clean_ocr_character_confusions(text.strip())
 
     raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", cleaned_input) if p.strip()]
     out_paragraphs: list[str] = []
@@ -1298,7 +1397,13 @@ def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True
         if not lines:
             continue
 
-        # Preserve line structure for multi-column tables or markdown tables
+        # Check structured multi-row numeric table first
+        formatted_table = _format_numeric_table_block(lines, reformat_as_markdown=reformat_as_markdown)
+        if formatted_table is not None:
+            out_paragraphs.append(formatted_table)
+            continue
+
+        # Preserve line structure for multi-space column tables or existing markdown tables
         is_tabular = any(re.search(r"\S\s{3,}\S", ln) for ln in lines) or lines[0].lstrip().startswith("|")
         if is_tabular:
             out_paragraphs.append("\n".join(lines))
@@ -1342,6 +1447,9 @@ async def process_chunk(
             len(processed_chunk),
         )
         return processed_chunk, new_context
+
+    # Pre-clean deterministic typewriter OCR confusions and line-wrap hyphenations before LLM prompting
+    chunk = clean_ocr_character_confusions(chunk)
 
     active_model = (
         DEFAULT_LOCAL_MODEL_NAME
@@ -1692,8 +1800,9 @@ def remove_corrected_text_header(text: str) -> str:
 
 def _extract_significant_numbers(text: str) -> set[str]:
     """Extract normalized multi-digit numbers, years, decimals, and percentages for conservation checking."""
-    # Normalize OCR comma-decimals where a comma is followed by 1-2 digits rather than 3 thousands digits (e.g., '+2,8%' -> '+2.8%')
+    # Normalize OCR comma-decimals ('+2,8%' -> '+2.8%') and space-decimal percentages ('+3 8%' -> '+3.8%')
     normalized_text = re.sub(r"(?<![,\d])(\d+),(\d{1,2})(?![,\d])", r"\1.\2", text)
+    normalized_text = re.sub(r"([+\-]\d+)[ \t]+(\d)%", r"\1.\2%", normalized_text)
     # Find numbers with >= 2 digits or decimals/percentages/dollar figures
     raw_matches = re.findall(r"\b\d[\d,]*\.?\d*\b", normalized_text)
     conserved: set[str] = set()

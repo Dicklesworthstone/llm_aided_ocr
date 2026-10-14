@@ -724,3 +724,71 @@ async def test_b23_title_case_headings_and_underline_underscore_cleanup_in_no_ll
     assert "but_for" not in out
     assert "but for which nothing should be paid at the time of purchase." in out
 
+
+@pytest.mark.asyncio
+async def test_b25_typewriter_ocr_character_confusion_cleaner_and_pre_llm_wiring():
+    sample = (
+        "(L) The funds had grown in this memo ~- partly because of the company ~ or even\n"
+        "managing $20 ~ $50 million vs the § & P 500, $ & P 500, and S$ & P 500 (+2,8% and +3 8%)."
+    )
+    cleaned = llm_aided_ocr.clean_ocr_character_confusions(sample)
+    assert cleaned.startswith("(1) The funds had grown")
+    assert "memo - partly" in cleaned
+    assert "company - or even" in cleaned
+    assert "$20 - $50 million" in cleaned
+    assert cleaned.count("S & P 500") == 3
+    assert "+2.8% and +3.8%" in cleaned
+
+    # Verify process_chunk pre-cleans the chunk before passing it to generate_completion
+    captured_prompts: list[str] = []
+
+    async def _fake_generate(prompt: str, max_tokens: int = 1024) -> str:
+        captured_prompts.append(prompt)
+        return "Cleaned chunk output."
+
+    with patch.object(llm_aided_ocr, "generate_completion", side_effect=_fake_generate):
+        await llm_aided_ocr.process_chunk(
+            sample,
+            "",
+            0,
+            1,
+            reformat_as_markdown=False,
+            suppress_headers_and_page_numbers=True,
+            use_llm=True,
+        )
+    assert len(captured_prompts) == 1
+    assert "(1) The funds had grown" in captured_prompts[0]
+    assert "+2.8% and +3.8%" in captured_prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_b26_multi_row_numeric_table_detection_and_markdown_formatting():
+    raw_text = await asyncio.to_thread(RAW_OCR_PATH.read_text, encoding="utf-8")
+    pages = [p for p in raw_text.split("\x0c") if p.strip()]
+    out = await llm_aided_ocr.process_document(
+        pages,
+        reformat_as_markdown=True,
+        suppress_headers_and_page_numbers=True,
+        use_llm=False,
+    )
+
+    # 1. Page 6 Corporate Net Worth 3-column table is formatted as a Markdown table
+    assert "| Company | Corporate Net Worth | Pension Fund Assets |" in out
+    assert "| A&P | $599 | $236 |" in out
+    assert "| U. S. Steel | 3,577 | 2,239 |" in out
+
+    # 2. Page 11 Bank Performance 2-column table is formatted as a Markdown table with repaired decimals and S & P 500
+    assert "| Category | Value |" in out
+    assert "| Dow-Jones Industrials | +2.8% |" in out
+    assert "| S & P 500 | +3.8% |" in out
+    assert "| First National City | +1.0% |" in out
+    assert "| Morgan Guaranty | +3.4% |" in out
+
+    # 3. Verify 100% numeric and footnote conservation on deterministic --no-llm output
+    metrics = llm_aided_ocr.verify_content_conservation(raw_text, out)
+    assert metrics["missing_numbers"] == []
+    assert abs(metrics["numeric_recall"] - 1.0) < 1e-6
+    assert abs(metrics["footnote_recall"] - 1.0) < 1e-6
+    assert metrics["deterministic_score"] == 100
+
+
