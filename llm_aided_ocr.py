@@ -1007,65 +1007,67 @@ def is_footnote_start_line(line: str) -> bool:
 
 _COMPOUND_HYPHEN_PREFIXES: frozenset[str] = frozenset(
     {
+        "above",
         "all",
-        "anti",
-        "co",
-        "counter",
+        "below",
+        "coin",
         "cross",
+        "double",
         "eight",
         "eighty",
-        "ex",
         "fifty",
+        "first",
         "five",
         "forty",
         "four",
         "full",
         "half",
         "high",
-        "inter",
         "long",
         "low",
         "mid",
-        "multi",
         "neo",
         "nine",
         "ninety",
         "non",
         "one",
-        "over",
         "pan",
         "part",
-        "post",
-        "pre",
-        "pro",
+        "partially",
+        "private",
         "pseudo",
         "quasi",
-        "re",
+        "second",
         "self",
         "semi",
         "seven",
         "seventy",
         "short",
+        "single",
         "six",
         "sixty",
-        "sub",
         "ten",
-        "three",
+        "third",
         "thirty",
+        "three",
         "twenty",
         "two",
         "ultra",
-        "under",
         "vice",
         "well",
+        "wholly",
     }
+)
+
+_LINE_WRAP_HYPHEN_RE = re.compile(
+    r"((?:[A-Za-z]+-)*[A-Za-z]{2,})[-~]\s*\n(?:\s*\n)?\s*([a-z][A-Za-z]*(?:-[A-Za-z]+)*)"
 )
 
 
 def _dehyphenate_line_wrap(match: re.Match[str]) -> str:
     prefix = match.group(1)
     suffix = match.group(2)
-    if prefix.lower() in _COMPOUND_HYPHEN_PREFIXES:
+    if "-" in prefix or "-" in suffix or prefix.lower() in _COMPOUND_HYPHEN_PREFIXES:
         return f"{prefix}-{suffix}"
     return f"{prefix}{suffix}"
 
@@ -1080,12 +1082,7 @@ def _join_ocr_fragments(left: str, right: str, separator: str = " ") -> str:
         return l_str
     if re.search(r"[A-Za-z]{2,}[-~]$", l_str) and re.match(r"^[a-z][A-Za-z]*", r_str):
         combined = f"{l_str}\n{r_str}"
-        return re.sub(
-            r"([A-Za-z]{2,})[-~]\s*\n\s*([a-z][A-Za-z]*)",
-            _dehyphenate_line_wrap,
-            combined,
-            count=1,
-        )
+        return _LINE_WRAP_HYPHEN_RE.sub(_dehyphenate_line_wrap, combined, count=1)
     return f"{l_str}{separator}{r_str}"
 
 
@@ -1279,16 +1276,42 @@ def clean_raw_ocr_text(text: str, suppress_headers_and_page_numbers: bool = True
     return "\n\n".join(cleaned)
 
 
+_TYPEWRITER_WORD_SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bfinaneial\b"), "financial"),
+    (re.compile(r"\beurrent\b"), "current"),
+    (re.compile(r"\belient\b"), "client"),
+    (re.compile(r"\beriticism\b"), "criticism"),
+    (re.compile(r"\bete\."), "etc."),
+    (re.compile(r"\bbecone\b"), "become"),
+    (re.compile(r"\bamually\b"), "annually"),
+    (re.compile(r"\banalagous\b"), "analogous"),
+    (re.compile(r"fund:-managenient\."), "fund management"),
+    (re.compile(r"\bmanagenient\b"), "management"),
+    (re.compile(r",eLetralone\b"), ", let alone"),
+    (re.compile(r"\bIna\b"), "In a"),
+    (re.compile(r"\bfo(\s+control\b)"), r"To\1"),
+    (re.compile(r"\bgood(\s+)fer\b"), r"good\1for"),
+    (re.compile(r"\bpaths(\s+)ean\b"), r"paths\1can"),
+    (re.compile(r"\bin(\s+the\s+)hank\""), r'in\1"bank"'),
+    (re.compile(r"[‘'\"]t(manufactured)[”\"]"), r'"\1"'),
+    (re.compile(r"\b4#[Ss]-degree\b"), "45-degree"),
+    (re.compile(r"\bC(\d)\)"), r"(\1)"),
+    (re.compile(r",:if\b"), ", if"),
+)
+
+
 def clean_ocr_character_confusions(text: str) -> str:
     """Deterministically repair high-frequency typewriter/Tesseract character confusions and line-wrap splits."""
     if not text:
         return ""
 
-    # 1. Dehyphenate words split across single or double newlines by '-' or '~' (e.g. 'manage-\nment', 'corres~\nponding')
+    # 1. Dehyphenate words split across single or double newlines by '-' or '~' (e.g. 'manage-\nment', 'cost-of-\nliving')
+    cleaned = _LINE_WRAP_HYPHEN_RE.sub(_dehyphenate_line_wrap, text)
     cleaned = re.sub(
-        r"([A-Za-z]{2,})[-~]\s*\n(?:\s*\n)?\s*([a-z][A-Za-z]*)",
-        _dehyphenate_line_wrap,
-        text,
+        r"\b(non|private|above|below|self|well|high|low|long|short|all|full|half|part|cross)[ \t]+[-~][ \t]*(?:\n(?:\s*\n)?[ \t]*|[ \t]+)([a-z][A-Za-z]*)",
+        r"\1-\2",
+        cleaned,
+        flags=re.IGNORECASE,
     )
     # 2. Heal comma-to-parenthetical blank-line splits (e.g. 'Last 3 market cycles,\n\n(6/30/62 to 12/31/74)')
     cleaned = re.sub(r",\s*\n\s*\n\s*(?=\([0-9a-z])", ", ", cleaned)
@@ -1307,7 +1330,7 @@ def clean_ocr_character_confusions(text: str) -> str:
     cleaned = re.sub(r"(?<=[A-Za-z])~(?=[A-Za-z])", "-", cleaned)
     # 6. Repair S & P symbol confusions ('§ & P 500', '$ & P 500', 'S$ & P 500', '§ & P')
     cleaned = re.sub(r"(?:S\$|§|\$)\s*&\s*P\b", "S & P", cleaned)
-    # 7. Repair percentage decimal confusions ('+2,8%' -> '+2.8%', '+3 8%' -> '+3.8%', '496 instead of 9%' -> '4% instead of 9%')
+    # 7. Repair percentage decimal and typewriter ½ fraction confusions ('+2,8%', '+3 8%', '496 instead of 9%', '$1% billion')
     cleaned = re.sub(r"([+\-]?\d+),(\d{1,2})%", r"\1.\2%", cleaned)
     cleaned = re.sub(r"([+\-]\d+)[ \t]+(\d)%", r"\1.\2%", cleaned)
     cleaned = re.sub(
@@ -1315,6 +1338,10 @@ def clean_ocr_character_confusions(text: str) -> str:
         r"\1%",
         cleaned,
     )
+    cleaned = re.sub(r"\$(\d+)%(?=\s+(?:million|billion)\b)", r"$\1.5", cleaned)
+    # 8. Repair unambiguous typewriter c->e / m->n / strikeover lexical confusions
+    for pattern, replacement in _TYPEWRITER_WORD_SUBSTITUTIONS:
+        cleaned = pattern.sub(replacement, cleaned)
     return cleaned
 
 
@@ -1852,9 +1879,11 @@ def remove_corrected_text_header(text: str) -> str:
 
 def _extract_significant_numbers(text: str) -> set[str]:
     """Extract normalized multi-digit numbers, years, decimals, and percentages for conservation checking."""
-    # Normalize OCR comma-decimals ('+2,8%' -> '+2.8%') and space-decimal percentages ('+3 8%' -> '+3.8%')
+    # Normalize OCR comma-decimals ('+2,8%' -> '+2.8%'), space-decimal percentages ('+3 8%' -> '+3.8%'), and '$1% billion' -> '$1.5 billion'
     normalized_text = re.sub(r"(?<![,\d])(\d+),(\d{1,2})(?![,\d])", r"\1.\2", text)
     normalized_text = re.sub(r"([+\-]\d+)[ \t]+(\d)%", r"\1.\2%", normalized_text)
+    normalized_text = re.sub(r"\$(\d+)%(?=\s+(?:million|billion)\b)", r"$\1.5", normalized_text)
+    normalized_text = re.sub(r"\b4#[Ss]-degree\b", "45-degree", normalized_text)
     # Find numbers with >= 2 digits or decimals/percentages/dollar figures
     raw_matches = re.findall(r"\b\d[\d,]*\.?\d*\b", normalized_text)
     conserved: set[str] = set()

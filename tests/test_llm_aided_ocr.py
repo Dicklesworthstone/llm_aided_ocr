@@ -838,3 +838,52 @@ async def test_b29_becker_study_table_reconstruction_and_footnote_blockquotes():
     # 3. Author footnotes are formatted as blockquotes (> * ...) in Markdown mode
     assert "> * In the short term, it frequently is better to look smart" in out
     assert "> * In prior years it was felt that by limiting contributions" in out
+
+
+def test_b31_compound_dehyphenation_precision_and_multi_word_compounds():
+    sample = (
+        "Energy ex-\npended on the pro-\ngram produced re-\nturns for re-\ntired workers with ex-\nperience. "
+        "Meanwhile cost-of-\nliving adjustments and highly-\nthought-of managers in above-\naverage, "
+        "double-\ndigit, partially-\nowned, non ~\nconventional, private -\nowner businesses engaged in coin-\nflipping."
+    )
+    cleaned = llm_aided_ocr.clean_ocr_character_confusions(sample)
+    for solid in ("expended", "program", "returns", "retired", "experience"):
+        assert solid in cleaned
+    for compound in (
+        "cost-of-living",
+        "highly-thought-of",
+        "above-average",
+        "double-digit",
+        "partially-owned",
+        "non-conventional",
+        "private-owner",
+        "coin-flipping",
+    ):
+        assert compound in cleaned
+
+
+@pytest.mark.asyncio
+async def test_b32_typewriter_lexical_and_fraction_repairs_on_buffett_letter():
+    raw_text = await asyncio.to_thread(RAW_OCR_PATH.read_text, encoding="utf-8")
+    pages = [p for p in raw_text.split("\x0c") if p.strip()]
+    out = await llm_aided_ocr.process_document(
+        pages,
+        reformat_as_markdown=True,
+        suppress_headers_and_page_numbers=True,
+        use_llm=False,
+    )
+
+    # Verify typewriter fraction ($1% billion -> $1.5 billion), parenthesis (C4) -> (4)), and c->e/m->n repairs
+    assert "($1.5 billion per year on $300 billion of assets)" in out
+    assert "or (1) and (4), but (4) and (5)" in out
+    assert "45-degree angle" in out
+    assert '"manufactured" the record.' in out
+    assert "criticism, let alone Litigation. On the other hand, if" in out
+    assert "above average pension fund management is very close to nil." in out
+    for garbled in ("finaneial", "eurrent", "elient", "eriticism", "becone", "amually", "managenient", "eLetralone", "4#S-degree"):
+        assert garbled not in out
+
+    metrics = llm_aided_ocr.verify_content_conservation(raw_text, out)
+    assert metrics["missing_numbers"] == []
+    assert abs(metrics["numeric_recall"] - 1.0) < 1e-6
+    assert metrics["deterministic_score"] == 100
