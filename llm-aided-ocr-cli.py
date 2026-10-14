@@ -78,6 +78,11 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip the final output quality assessment step",
     )
     parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Run deterministic OCR cleanup, dehyphenation, reflow, and footnote relocation without calling any LLM",
+    )
+    parser.add_argument(
         "--chunk-size",
         type=int,
         default=8000,
@@ -165,6 +170,7 @@ async def run_pdf_processor(args: argparse.Namespace) -> int:
         assess_quality=not getattr(args, "no_quality_check", False),
         chunk_size=getattr(args, "chunk_size", 8000),
         report_json_path=getattr(args, "report_json", None),
+        use_llm=not getattr(args, "no_llm", False),
     )
     return 0
 

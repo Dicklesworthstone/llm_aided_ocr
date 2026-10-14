@@ -214,6 +214,12 @@ python llm-aided-ocr-cli.py \
   --no-quality-check \
   --output-dir ./out
 
+# Run 100% offline deterministic OCR cleanup (page-number stripping, footnote relocation, dehyphenation, and paragraph reflow) without any LLM
+python llm-aided-ocr-cli.py \
+  --raw-ocr-input 160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt \
+  --no-llm \
+  --output-dir ./out
+
 # Run a standalone deterministic content conservation audit and save JSON report
 python llm-aided-ocr-cli.py --verify-only \
   160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt \

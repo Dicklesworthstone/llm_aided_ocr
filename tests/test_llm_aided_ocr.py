@@ -515,3 +515,111 @@ async def test_b14_extended_cli_flags_and_json_report_export(tmp_path):
     assert report_data["lexical_cosine_similarity"] >= 0.94
     assert report_data["deterministic_score"] >= 95
 
+
+@pytest.mark.asyncio
+async def test_b16_placeholder_api_keys_return_none_and_local_model_short_circuit():
+    with (
+        patch.object(llm_aided_ocr, "OPENAI_API_KEY", "your-openai-api-key"),
+        patch.object(llm_aided_ocr, "ANTHROPIC_API_KEY", "your-anthropic-api-key"),
+    ):
+        assert llm_aided_ocr.get_openai_client() is None
+        assert llm_aided_ocr.get_anthropic_client() is None
+
+    # Verify download_models() immediately returns existing DEFAULT_LOCAL_MODEL_NAME without network download
+    models_dir = Path(llm_aided_ocr.__file__).resolve().parent / "models"
+    models_dir.mkdir(exist_ok=True)
+    dummy_local = models_dir / "test_b16_existing_local.gguf"
+    created = False
+    if not dummy_local.exists():
+        await asyncio.to_thread(dummy_local.write_bytes, b"GGUF-local")
+        created = True
+    try:
+        with patch.object(llm_aided_ocr, "DEFAULT_LOCAL_MODEL_NAME", "test_b16_existing_local.gguf"):
+            names, statuses = await llm_aided_ocr.download_models()
+            assert names == ["test_b16_existing_local.gguf"]
+            assert statuses and statuses[0]["status"] == "success"
+            assert statuses[0]["message"] == "File already exists."
+    finally:
+        if created and dummy_local.exists():
+            await asyncio.to_thread(dummy_local.unlink)
+
+
+def test_b17_split_document_into_chunks_preserves_paragraph_boundaries():
+    oversized_para = " ".join(
+        f"Sentence {i} in the long opening paragraph explains pension liability compounding."
+        for i in range(1, 35)
+    )
+    para_two = "Second paragraph has distinct content about actuarial assumptions."
+    para_three = "Third paragraph concludes the section."
+    doc_text = f"{oversized_para}\n\n{para_two}\n\n{para_three}"
+
+    chunks = llm_aided_ocr.split_document_into_chunks(doc_text, chunk_size=600, model_name="gpt-4o-mini")
+    assert len(chunks) >= 3
+    # The final chunk must contain para_two and para_three separated by a double newline, not mixed with oversized_para sentences
+    assert f"{para_two}\n\n{para_three}" in chunks[-1]
+    assert "Sentence 1 " not in chunks[-1]
+
+
+@pytest.mark.asyncio
+async def test_b18_deterministic_reflow_dehyphenate_and_no_llm_cli_mode(tmp_path):
+    raw_sample = (
+        "~2-\n\n"
+        "ACT ONE - THE AWAKENING\n\n"
+        "Total pension Silence liabilities compound over long-\n"
+        "term horizons when manage-\n"
+        "ment makes twenty-\n"
+        "five year promises.\n\n"
+        "* Author footnote explaining the actuarial assumptions in detail."
+    )
+    reflowed = llm_aided_ocr.reflow_and_dehyphenate_ocr_text(raw_sample, reformat_as_markdown=True)
+    assert "## Act One - The Awakening" in reflowed
+    assert "long-term horizons when management makes twenty-five year promises." in reflowed
+    assert "* Author footnote explaining the actuarial assumptions in detail." in reflowed
+
+    # End-to-end CLI test with --no-llm and --report-json (guaranteed zero LLM calls)
+    cli = _load_cli_module()
+    raw_in = tmp_path / "offline_doc__raw_ocr_output.txt"
+    report_out = tmp_path / "offline_report.json"
+    await asyncio.to_thread(raw_in.write_text, raw_sample, encoding="utf-8")
+
+    with patch.object(llm_aided_ocr, "generate_completion", side_effect=AssertionError("LLM should not be called")):
+        args = cli.parse_arguments(
+            [
+                "--raw-ocr-input",
+                str(raw_in),
+                "--output-dir",
+                str(tmp_path),
+                "--no-llm",
+                "--report-json",
+                str(report_out),
+            ]
+        )
+        rc = await cli.run_pdf_processor(args)
+        assert rc == 0
+
+    corrected_out = tmp_path / "offline_doc_llm_corrected.md"
+    assert corrected_out.exists()
+    out_text = await asyncio.to_thread(corrected_out.read_text, encoding="utf-8")
+    assert "~2-" not in out_text
+    assert "management makes twenty-five year promises." in out_text
+    assert report_out.exists()
+
+
+def test_b19_ocr_comma_decimal_and_percent_96_conservation_on_buffett_sample():
+    # Direct unit test of comma-decimal normalization and 96->% OCR repair recognition
+    raw_snippet = "Dow-Jones Industrials +2,8% while bond rates then were 496 instead of 9% on $70,000."
+    proc_snippet = "Dow-Jones Industrials +2.8% while bond rates then were 4% instead of 9% on $70,000."
+    snippet_report = llm_aided_ocr.verify_content_conservation(raw_snippet, proc_snippet)
+    assert snippet_report["missing_numbers"] == []
+    assert abs(snippet_report["numeric_recall"] - 1.0) < 1e-6
+
+    # Full flagship Warren Buffett letter conservation check must now achieve 100% numeric recall and 100/100 score
+    raw_text = RAW_OCR_PATH.read_text(encoding="utf-8")
+    md_text = CORRECTED_MD_PATH.read_text(encoding="utf-8")
+    full_report = llm_aided_ocr.verify_content_conservation(raw_text, md_text)
+    assert full_report["missing_numbers"] == []
+    assert abs(full_report["numeric_recall"] - 1.0) < 1e-6
+    assert abs(full_report["footnote_recall"] - 1.0) < 1e-6
+    assert full_report["seam_anomalies"] == []
+    assert full_report["deterministic_score"] == 100
+

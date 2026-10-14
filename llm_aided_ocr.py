@@ -110,10 +110,13 @@ def is_valid_api_key(key: str | None) -> bool:
     return True
 
 
-def get_openai_client(api_key: str | None = None) -> AsyncOpenAI:
-    """Lazily initialize and cache an AsyncOpenAI client."""
+def get_openai_client(api_key: str | None = None) -> AsyncOpenAI | None:
+    """Lazily initialize and cache an AsyncOpenAI client when a valid API key is provided."""
     global openai_client
-    resolved_key = (api_key if api_key is not None else OPENAI_API_KEY).strip()
+    raw_key = api_key if api_key is not None else OPENAI_API_KEY
+    if not is_valid_api_key(raw_key):
+        return None
+    resolved_key = raw_key.strip()
     if openai_client is not None and api_key is None:
         return openai_client
     if resolved_key not in _OPENAI_CLIENTS:
@@ -123,9 +126,12 @@ def get_openai_client(api_key: str | None = None) -> AsyncOpenAI:
     return _OPENAI_CLIENTS[resolved_key]
 
 
-def get_anthropic_client(api_key: str | None = None) -> AsyncAnthropic:
-    """Lazily initialize and cache an AsyncAnthropic client."""
-    resolved_key = (api_key if api_key is not None else ANTHROPIC_API_KEY).strip()
+def get_anthropic_client(api_key: str | None = None) -> AsyncAnthropic | None:
+    """Lazily initialize and cache an AsyncAnthropic client when a valid API key is provided."""
+    raw_key = api_key if api_key is not None else ANTHROPIC_API_KEY
+    if not is_valid_api_key(raw_key):
+        return None
+    resolved_key = raw_key.strip()
     if resolved_key not in _ANTHROPIC_CLIENTS:
         _ANTHROPIC_CLIENTS[resolved_key] = AsyncAnthropic(api_key=resolved_key)
     return _ANTHROPIC_CLIENTS[resolved_key]
@@ -216,26 +222,35 @@ def _download_https_file(url: str, destination: str) -> None:
 
 
 # Model Download
-async def download_models() -> tuple[list[str], list[dict[str, str]]]:
+async def download_models(model_name: str | None = None) -> tuple[list[str], list[dict[str, str]]]:
     download_status: list[dict[str, str]] = []
-    model_url = (
+    default_url = (
         "https://huggingface.co/Orenguteng/Llama-3.1-8B-Lexi-Uncensored-GGUF/"
         "resolve/main/Llama-3.1-8B-Lexi-Uncensored_Q5_fixedrope.gguf"
     )
-    model_name = os.path.basename(model_url)
+    target_model = (model_name or DEFAULT_LOCAL_MODEL_NAME).strip()
+    model_url = default_url
     current_file_path = os.path.abspath(__file__)
     base_dir = os.path.dirname(current_file_path)
     models_dir = os.path.join(base_dir, "models")
 
     os.makedirs(models_dir, exist_ok=True)
+    existing_matches = glob.glob(os.path.join(models_dir, f"{target_model}*"))
+    if existing_matches:
+        found_path = max(existing_matches, key=os.path.getmtime)
+        found_name = os.path.basename(found_path)
+        logger.info("Model file already exists: %s", found_path)
+        return [found_name], [{"url": model_url, "status": "success", "message": "File already exists."}]
+
+    resolved_name = target_model if target_model.endswith(".gguf") else os.path.basename(model_url)
     lock = FileLock(os.path.join(models_dir, "download.lock"))
     status = {"url": model_url, "status": "success", "message": "File already exists."}
-    filename = os.path.join(models_dir, model_name)
+    filename = os.path.join(models_dir, resolved_name)
 
     try:
         with lock.acquire(timeout=1200):
             if not os.path.exists(filename):
-                logger.info("Downloading model %s from %s...", model_name, model_url)
+                logger.info("Downloading model %s from %s...", resolved_name, model_url)
                 await asyncio.to_thread(_download_https_file, model_url, filename)
                 file_size = os.path.getsize(filename) / (1024 * 1024)
                 if file_size < 100:
@@ -250,17 +265,17 @@ async def download_models() -> tuple[list[str], list[dict[str, str]]]:
             else:
                 logger.info("Model file already exists: %s", filename)
     except Timeout:
-        logger.error("Error: Could not acquire lock for downloading %s", model_name)
+        logger.error("Error: Could not acquire lock for downloading %s", resolved_name)
         status["status"] = "failure"
         status["message"] = "Could not acquire lock for downloading."
     except Exception as e:
-        logger.error("Error downloading model %s: %s", model_name, e)
+        logger.error("Error downloading model %s: %s", resolved_name, e)
         status["status"] = "failure"
         status["message"] = str(e)
 
     download_status.append(status)
     logger.info("Model download process completed.")
-    return [model_name], download_status
+    return [resolved_name], download_status
 
 
 # Model Loading
@@ -620,10 +635,10 @@ async def generate_completion_from_claude(
     prompt: str,
     max_tokens: int = CLAUDE_MAX_TOKENS - TOKEN_BUFFER,
 ) -> str | None:
-    if not is_valid_api_key(ANTHROPIC_API_KEY):
+    client = get_anthropic_client()
+    if client is None:
         logger.error("Anthropic API key not found or invalid. Please set a valid ANTHROPIC_API_KEY.")
         return None
-    client = get_anthropic_client()
     prompt_size = estimate_tokens(prompt, CLAUDE_MODEL_STRING)
     adjusted_max = min(max_tokens, CLAUDE_MAX_TOKENS - prompt_size - TOKEN_BUFFER)
 
@@ -668,10 +683,10 @@ async def generate_completion_from_claude(
 
 
 async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -> str | None:
-    if not is_valid_api_key(OPENAI_API_KEY):
+    client = get_openai_client()
+    if client is None:
         logger.error("OpenAI API key not found or invalid. Please set a valid OPENAI_API_KEY.")
         return None
-    client = get_openai_client()
     prompt_size = estimate_tokens(prompt, OPENAI_COMPLETION_MODEL)
     context_limit = max(4096, OPENAI_MAX_TOKENS)
     adjusted_max = max(1, min(max_tokens, context_limit - prompt_size - TOKEN_BUFFER))
@@ -1105,6 +1120,111 @@ def clean_raw_ocr_text(text: str, suppress_headers_and_page_numbers: bool = True
     return "\n\n".join(cleaned)
 
 
+_COMPOUND_HYPHEN_PREFIXES: frozenset[str] = frozenset(
+    {
+        "all",
+        "anti",
+        "co",
+        "counter",
+        "cross",
+        "eight",
+        "eighty",
+        "ex",
+        "fifty",
+        "five",
+        "forty",
+        "four",
+        "full",
+        "half",
+        "high",
+        "inter",
+        "long",
+        "low",
+        "mid",
+        "multi",
+        "neo",
+        "nine",
+        "ninety",
+        "non",
+        "one",
+        "over",
+        "pan",
+        "part",
+        "post",
+        "pre",
+        "pro",
+        "pseudo",
+        "quasi",
+        "re",
+        "self",
+        "semi",
+        "seven",
+        "seventy",
+        "short",
+        "six",
+        "sixty",
+        "sub",
+        "ten",
+        "three",
+        "thirty",
+        "twenty",
+        "two",
+        "ultra",
+        "under",
+        "vice",
+        "well",
+    }
+)
+
+
+def _dehyphenate_line_wrap(match: re.Match[str]) -> str:
+    prefix = match.group(1)
+    suffix = match.group(2)
+    if prefix.lower() in _COMPOUND_HYPHEN_PREFIXES:
+        return f"{prefix}-{suffix}"
+    return f"{prefix}{suffix}"
+
+
+def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True) -> str:
+    """Deterministically repair typewriter line-wrap hyphenations and reflow intra-paragraph line breaks."""
+    if not text or not text.strip():
+        return ""
+
+    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    out_paragraphs: list[str] = []
+
+    for para in raw_paragraphs:
+        dehyphenated = re.sub(
+            r"([A-Za-z]{2,})-\s*\n\s*([a-z][A-Za-z]*)",
+            _dehyphenate_line_wrap,
+            para,
+        )
+        lines = [ln.rstrip() for ln in dehyphenated.splitlines() if ln.strip()]
+        if not lines:
+            continue
+
+        # Preserve line structure for multi-column tables or markdown tables
+        is_tabular = any(re.search(r"\S\s{3,}\S", ln) for ln in lines) or lines[0].lstrip().startswith("|")
+        if is_tabular:
+            out_paragraphs.append("\n".join(lines))
+            continue
+
+        reflowed = re.sub(r"[ \t]+", " ", " ".join(ln.strip() for ln in lines)).strip()
+        if reformat_as_markdown and not reflowed.startswith("#") and not is_footnote_start_line(reflowed):
+            # Promote short standalone ALL-CAPS section titles to Markdown headings
+            if (
+                len(reflowed) <= 80
+                and not reflowed.endswith((".", ":", ";", ",", "?", "!"))
+                and reflowed.isupper()
+                and any(c.isalpha() for c in reflowed)
+            ):
+                reflowed = f"## {reflowed.title()}"
+
+        out_paragraphs.append(reflowed)
+
+    return "\n\n".join(out_paragraphs)
+
+
 async def process_chunk(
     chunk: str,
     prev_context: str,
@@ -1112,8 +1232,20 @@ async def process_chunk(
     total_chunks: int,
     reformat_as_markdown: bool,
     suppress_headers_and_page_numbers: bool,
+    use_llm: bool = True,
 ) -> tuple[str, str]:
     logger.info("Processing chunk %d/%d (length: %d characters)", chunk_index + 1, total_chunks, len(chunk))
+
+    if not use_llm:
+        processed_chunk = reflow_and_dehyphenate_ocr_text(chunk, reformat_as_markdown=reformat_as_markdown)
+        new_context = processed_chunk[-1000:] if processed_chunk else ""
+        logger.info(
+            "Chunk %d/%d processed deterministically (--no-llm). Output length: %d characters",
+            chunk_index + 1,
+            total_chunks,
+            len(processed_chunk),
+        )
+        return processed_chunk, new_context
 
     active_model = (
         DEFAULT_LOCAL_MODEL_NAME
@@ -1157,13 +1289,17 @@ Corrected text:
 
     ocr_corrected_chunk = await generate_completion(ocr_correction_prompt, max_tokens=completion_budget)
 
-    # Handle None return from generate_completion - fall back to original chunk
+    # Handle None return from generate_completion - fall back to deterministic reflow/dehyphenation
     if ocr_corrected_chunk is None:
-        logger.warning("OCR correction failed for chunk %d, using original text", chunk_index + 1)
-        ocr_corrected_chunk = chunk
-    else:
-        ocr_corrected_chunk = strip_llm_wrapper_artifacts(ocr_corrected_chunk)
+        logger.warning(
+            "OCR correction LLM unavailable for chunk %d; applying deterministic reflow and dehyphenation",
+            chunk_index + 1,
+        )
+        processed_chunk = reflow_and_dehyphenate_ocr_text(chunk, reformat_as_markdown=reformat_as_markdown)
+        new_context = processed_chunk[-1000:] if processed_chunk else ""
+        return processed_chunk, new_context
 
+    ocr_corrected_chunk = strip_llm_wrapper_artifacts(ocr_corrected_chunk)
     processed_chunk = ocr_corrected_chunk
 
     # Step 2: Markdown Formatting (if requested)
@@ -1216,11 +1352,13 @@ async def process_chunks(
     chunks: list[str],
     reformat_as_markdown: bool,
     suppress_headers_and_page_numbers: bool,
+    use_llm: bool = True,
 ) -> list[str]:
     total_chunks = len(chunks)
     if total_chunks == 0:
         return []
 
+    extra_kwargs: dict[str, Any] = {"use_llm": False} if not use_llm else {}
     semaphore = asyncio.Semaphore(max(1, MAX_CONCURRENT_REQUESTS))
 
     async def process_chunk_with_context(chunk: str, prev_context: str, index: int) -> tuple[int, str, str]:
@@ -1232,11 +1370,16 @@ async def process_chunks(
                 total_chunks,
                 reformat_as_markdown,
                 suppress_headers_and_page_numbers,
+                **extra_kwargs,
             )
             return index, processed_chunk, new_context
 
-    if USE_LOCAL_LLM:
-        logger.info("Using local LLM. Processing chunks sequentially...")
+    if USE_LOCAL_LLM or not use_llm:
+        logger.info(
+            "Processing %d chunks sequentially (%s)...",
+            total_chunks,
+            "deterministic --no-llm" if not use_llm else "local LLM",
+        )
         context = ""
         processed_chunks: list[str] = []
         for i, chunk in enumerate(chunks):
@@ -1247,6 +1390,7 @@ async def process_chunks(
                 total_chunks,
                 reformat_as_markdown,
                 suppress_headers_and_page_numbers,
+                **extra_kwargs,
             )
             processed_chunks.append(processed_chunk)
     else:
@@ -1365,11 +1509,51 @@ def stitch_chunks(processed_chunks: list[str], overlap_window: int = 35) -> str:
     return stitched
 
 
+def split_document_into_chunks(
+    full_text: str,
+    chunk_size: int = 8000,
+    model_name: str = "gpt-4o-mini",
+) -> list[str]:
+    """Split cleaned document text into paragraph-preserving chunks, delegating oversized paragraphs to chunk_text()."""
+    if not full_text or not full_text.strip():
+        return []
+    chunk_size = max(500, chunk_size)
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
+    chunks: list[str] = []
+    current_chunk: list[str] = []
+    current_chunk_length = 0
+
+    for paragraph in paragraphs:
+        paragraph_length = len(paragraph)
+        if paragraph_length > chunk_size:
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+                current_chunk = []
+                current_chunk_length = 0
+            para_tokens = max(1, estimate_tokens(paragraph, model_name))
+            token_budget = max(64, int(para_tokens * (chunk_size / max(1, paragraph_length))))
+            sub_chunks = chunk_text(paragraph, max_chunk_tokens=token_budget, model_name=model_name, overlap_size=0)
+            chunks.extend(sub_chunks)
+        elif current_chunk and current_chunk_length + paragraph_length + 2 > chunk_size:
+            chunks.append("\n\n".join(current_chunk))
+            current_chunk = [paragraph]
+            current_chunk_length = paragraph_length
+        else:
+            current_chunk.append(paragraph)
+            current_chunk_length += paragraph_length + (2 if len(current_chunk) > 1 else 0)
+
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    return chunks
+
+
 async def process_document(
     list_of_extracted_text_strings: list[str],
     reformat_as_markdown: bool = True,
     suppress_headers_and_page_numbers: bool = True,
     chunk_size: int = 8000,
+    use_llm: bool = True,
 ) -> str:
     logger.info("Starting document processing. Total pages: %d", len(list_of_extracted_text_strings))
     cleaned_pages = clean_page_artifacts(
@@ -1379,48 +1563,21 @@ async def process_document(
     full_text = "\n\n".join(cleaned_pages)
     logger.info("Size of full text before processing: %d characters", len(full_text))
     chunk_size = max(500, chunk_size)
-
-
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
-    chunks: list[str] = []
-    current_chunk: list[str] = []
-    current_chunk_length = 0
-
-    for paragraph in paragraphs:
-        paragraph_length = len(paragraph)
-        if current_chunk_length + paragraph_length <= chunk_size:
-            current_chunk.append(paragraph)
-            current_chunk_length += paragraph_length
-        else:
-            if current_chunk:
-                chunks.append("\n\n".join(current_chunk))
-            sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", paragraph) if s.strip()]
-            current_chunk = []
-            current_chunk_length = 0
-            for sentence in sentences:
-                if len(sentence) > chunk_size:
-                    if current_chunk:
-                        chunks.append(" ".join(current_chunk))
-                        current_chunk = []
-                        current_chunk_length = 0
-                    # Split oversized sentence by word token limit (~chunk_size // 4 tokens)
-                    chunks.extend(split_long_sentence(sentence, max(256, chunk_size // 4)))
-                    continue
-                sentence_length = len(sentence)
-                if current_chunk_length + sentence_length <= chunk_size:
-                    current_chunk.append(sentence)
-                    current_chunk_length += sentence_length
-                else:
-                    if current_chunk:
-                        chunks.append(" ".join(current_chunk))
-                    current_chunk = [sentence]
-                    current_chunk_length = sentence_length
-
-    if current_chunk:
-        chunks.append("\n\n".join(current_chunk) if len(current_chunk) > 1 else current_chunk[0])
+    active_model = (
+        DEFAULT_LOCAL_MODEL_NAME
+        if USE_LOCAL_LLM
+        else (CLAUDE_MODEL_STRING if API_PROVIDER == "CLAUDE" else OPENAI_COMPLETION_MODEL)
+    )
+    chunks = split_document_into_chunks(full_text, chunk_size=chunk_size, model_name=active_model)
 
     logger.info("Document split into %d chunks (target chunk_size=%d chars).", len(chunks), chunk_size)
-    processed_chunks = await process_chunks(chunks, reformat_as_markdown, suppress_headers_and_page_numbers)
+    extra_kwargs: dict[str, Any] = {"use_llm": False} if not use_llm else {}
+    processed_chunks = await process_chunks(
+        chunks,
+        reformat_as_markdown,
+        suppress_headers_and_page_numbers,
+        **extra_kwargs,
+    )
     final_text = stitch_chunks(processed_chunks)
     logger.info("Size of text after stitching chunks: %d characters", len(final_text))
     logger.info("Document processing complete. Final text length: %d characters", len(final_text))
@@ -1439,8 +1596,10 @@ def remove_corrected_text_header(text: str) -> str:
 
 def _extract_significant_numbers(text: str) -> set[str]:
     """Extract normalized multi-digit numbers, years, decimals, and percentages for conservation checking."""
+    # Normalize OCR comma-decimals where a comma is followed by 1-2 digits rather than 3 thousands digits (e.g., '+2,8%' -> '+2.8%')
+    normalized_text = re.sub(r"(?<![,\d])(\d+),(\d{1,2})(?![,\d])", r"\1.\2", text)
     # Find numbers with >= 2 digits or decimals/percentages/dollar figures
-    raw_matches = re.findall(r"\b\d[\d,]*\.?\d*\b", text)
+    raw_matches = re.findall(r"\b\d[\d,]*\.?\d*\b", normalized_text)
     conserved: set[str] = set()
     for m in raw_matches:
         norm = m.replace(",", "").strip(".")
@@ -1525,8 +1684,14 @@ def verify_content_conservation(original_text: str, processed_text: str) -> dict
     proc_numbers = _extract_significant_numbers(processed_text)
 
     if raw_numbers:
-        preserved_numbers = raw_numbers & proc_numbers
-        missing_numbers = sorted(raw_numbers - proc_numbers)
+        preserved_numbers = set(raw_numbers & proc_numbers)
+        for candidate in raw_numbers - preserved_numbers:
+            # Recognize common typewriter OCR misread where '<prefix>%' was scanned as '<prefix>96' (e.g., '4%' -> '496')
+            if len(candidate) >= 3 and candidate.endswith("96"):
+                prefix = candidate[:-2]
+                if prefix and re.search(rf"\b{re.escape(prefix)}\s*%", processed_text):
+                    preserved_numbers.add(candidate)
+        missing_numbers = sorted(raw_numbers - preserved_numbers)
         numeric_recall = len(preserved_numbers) / len(raw_numbers)
     else:
         missing_numbers = []
@@ -1610,12 +1775,20 @@ def _sample_start_mid_end(text: str, budget: int) -> str:
     return f"{start_seg}\n\n[... middle sample ...]\n\n{mid_seg}\n\n[... end sample ...]\n\n{end_seg}"
 
 
-async def assess_output_quality(original_text: str, processed_text: str) -> tuple[int | None, str | None]:
+async def assess_output_quality(
+    original_text: str,
+    processed_text: str,
+    use_llm: bool = True,
+) -> tuple[int | None, str | None]:
     max_chars = 15000  # Limit to avoid exceeding context limits
     available_chars_per_text = max_chars // 2
 
     conservation = verify_content_conservation(original_text, processed_text)
-    semantic_similarity = await compute_embedding_similarity(original_text, processed_text)
+    semantic_similarity = (
+        await compute_embedding_similarity(original_text, processed_text)
+        if use_llm
+        else conservation["lexical_cosine_similarity"]
+    )
     original_sample = _sample_start_mid_end(original_text, available_chars_per_text)
     processed_sample = _sample_start_mid_end(processed_text, available_chars_per_text)
 
@@ -1651,7 +1824,7 @@ SCORE: [Your score]
 EXPLANATION: [Your explanation]
 """
 
-    response = await generate_completion(prompt, max_tokens=1000)
+    response = await generate_completion(prompt, max_tokens=1000) if use_llm else None
 
     if response is None:
         logger.warning(
@@ -1706,13 +1879,16 @@ async def main(
     assess_quality: bool = True,
     chunk_size: int = 8000,
     report_json_path: str | None = None,
+    use_llm: bool = True,
 ):
     try:
         # Suppress HTTP request logs
         logging.getLogger("httpx").setLevel(logging.WARNING)
 
         # Download the model if using local LLM
-        if USE_LOCAL_LLM:
+        if not use_llm:
+            logger.info("Running in deterministic OCR cleanup mode (--no-llm).")
+        elif USE_LOCAL_LLM:
             _, download_status = await download_models()
             logger.info("Model download status: %s", download_status)
             logger.info("Using Local LLM with Model: %s", DEFAULT_LOCAL_MODEL_NAME)
@@ -1752,7 +1928,7 @@ async def main(
             with ThreadPoolExecutor() as executor:
                 list_of_extracted_text_strings = list(executor.map(ocr_fn, list_of_scanned_images))
             logger.info("Done extracting text from converted pages.")
-            raw_ocr_output = "\n".join(list_of_extracted_text_strings)
+            raw_ocr_output = "\x0c\n".join(p.replace("\x0c", "").rstrip() for p in list_of_extracted_text_strings)
             with open(raw_ocr_output_file_path, "w", encoding="utf-8") as f:
                 f.write(raw_ocr_output)
             logger.info("Raw OCR output written to: %s", raw_ocr_output_file_path)
@@ -1763,6 +1939,7 @@ async def main(
             reformat_as_markdown,
             suppress_headers_and_page_numbers,
             chunk_size=chunk_size,
+            use_llm=use_llm,
         )
         cleaned_text = remove_corrected_text_header(final_text)
 
@@ -1784,7 +1961,11 @@ async def main(
         quality_score: int | None = None
         explanation: str | None = None
         if assess_quality:
-            quality_score, explanation = await assess_output_quality(raw_ocr_output, cleaned_text)
+            quality_score, explanation = await assess_output_quality(
+                raw_ocr_output,
+                cleaned_text,
+                use_llm=use_llm,
+            )
             if quality_score is not None:
                 logger.info("Final quality score: %d/100", quality_score)
                 logger.info("Explanation: %s", explanation)
