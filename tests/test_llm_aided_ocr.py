@@ -792,3 +792,49 @@ async def test_b26_multi_row_numeric_table_detection_and_markdown_formatting():
     assert metrics["deterministic_score"] == 100
 
 
+def test_b28_complete_typewriter_ocr_character_and_footnote_marker_normalization():
+    sample = (
+        "It treats stock ownership as business ownership with the corres~\n"
+        "ponding adjustment in mental set. A few look better due to chance ~\n"
+        "just as in coin flipping. Ten did as well as the § & P, while rates then were\n"
+        "496 instead of 9%.\n\n"
+        "® In the short term, it frequently is better to look smart than to be smart."
+    )
+    cleaned = llm_aided_ocr.clean_ocr_character_confusions(sample)
+    assert "corresponding adjustment" in cleaned
+    assert "chance - just" in cleaned
+    assert "the S & P," in cleaned
+    assert "4% instead of 9%." in cleaned
+    assert "\n* In the short term, it frequently is better" in cleaned
+
+
+@pytest.mark.asyncio
+async def test_b29_becker_study_table_reconstruction_and_footnote_blockquotes():
+    raw_text = await asyncio.to_thread(RAW_OCR_PATH.read_text, encoding="utf-8")
+    pages = [p for p in raw_text.split("\x0c") if p.strip()]
+    out = await llm_aided_ocr.process_document(
+        pages,
+        reformat_as_markdown=True,
+        suppress_headers_and_page_numbers=True,
+        use_llm=False,
+    )
+
+    # 1. Becker Study 3-column table is reassembled from split comma/date-range blocks into a Markdown table
+    assert "**Overall Annual Return**" in out
+    assert "| Period | S & P 500 | Becker Median Result* |" in out
+    assert "| Last 3 market cycles, (6/30/62 to 12/31/74) | 5.3% | 4.1% |" in out
+    assert "| Last 2 market cycles, (9/30/66 to 12/31/74) | 2.1% | 0.4% |" in out
+    assert "| Last single market cycle, (6/30/70 to 12/31/74) | 2.2% | (0.3%) |" in out
+
+    # 2. Zero residual ~, §, ®, or 496 OCR confusions remain across the entire 19-page output
+    assert "~" not in out
+    assert "§" not in out
+    assert "®" not in out
+    assert "496" not in out
+    assert "corresponding adjustment in mental set." in out
+    assert "Ten did as well as or better than the S & P," in out
+    assert "except the rates then were 4% instead of 9%." in out
+
+    # 3. Author footnotes are formatted as blockquotes (> * ...) in Markdown mode
+    assert "> * In the short term, it frequently is better to look smart" in out
+    assert "> * In prior years it was felt that by limiting contributions" in out

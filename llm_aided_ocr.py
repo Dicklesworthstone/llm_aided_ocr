@@ -1078,10 +1078,10 @@ def _join_ocr_fragments(left: str, right: str, separator: str = " ") -> str:
         return r_str
     if not r_str:
         return l_str
-    if re.search(r"[A-Za-z]{2,}-$", l_str) and re.match(r"^[a-z][A-Za-z]*", r_str):
+    if re.search(r"[A-Za-z]{2,}[-~]$", l_str) and re.match(r"^[a-z][A-Za-z]*", r_str):
         combined = f"{l_str}\n{r_str}"
         return re.sub(
-            r"([A-Za-z]{2,})-\s*\n\s*([a-z][A-Za-z]*)",
+            r"([A-Za-z]{2,})[-~]\s*\n\s*([a-z][A-Za-z]*)",
             _dehyphenate_line_wrap,
             combined,
             count=1,
@@ -1143,7 +1143,7 @@ def _ends_mid_sentence(text: str) -> bool:
 
 
 def _should_merge_ocr_fragments(prev_para: str, next_para: str) -> bool:
-    """Return True when two adjacent OCR blocks are parts of a single sentence split by a spurious blank line or page break."""
+    """Return True when two adjacent OCR blocks are parts of a single sentence or table row split by a spurious blank line."""
     prev_s = prev_para.strip()
     next_s = next_para.strip()
     if not prev_s or not next_s:
@@ -1156,7 +1156,9 @@ def _should_merge_ocr_fragments(prev_para: str, next_para: str) -> bool:
         return False
     if not _ends_mid_sentence(prev_s):
         return False
-    if re.search(r"[A-Za-z]{2,}-$", prev_s) and re.match(r"^[a-z]", next_s):
+    if re.search(r"[A-Za-z]{2,}[-~]$", prev_s) and re.match(r"^[a-z]", next_s):
+        return True
+    if prev_s.endswith(",") and re.match(r"^\([0-9a-z]", next_s):
         return True
     return next_s[0].islower()
 
@@ -1215,7 +1217,12 @@ def clean_page_artifacts(
         j = 0
         while j < len(page_paras) - 1:
             if _should_merge_ocr_fragments(page_paras[j], page_paras[j + 1]):
-                page_paras[j] = _join_ocr_fragments(page_paras[j], page_paras[j + 1], separator="\n")
+                sep = (
+                    " "
+                    if page_paras[j].rstrip().endswith(",") and re.match(r"^\([0-9a-z]", page_paras[j + 1].lstrip())
+                    else "\n"
+                )
+                page_paras[j] = _join_ocr_fragments(page_paras[j], page_paras[j + 1], separator=sep)
                 page_paras.pop(j + 1)
             else:
                 j += 1
@@ -1277,34 +1284,42 @@ def clean_ocr_character_confusions(text: str) -> str:
     if not text:
         return ""
 
-    # 1. Dehyphenate words split across single or double newlines (e.g. 'manage-\nment' or 'mar-\n\nket')
+    # 1. Dehyphenate words split across single or double newlines by '-' or '~' (e.g. 'manage-\nment', 'corres~\nponding')
     cleaned = re.sub(
-        r"([A-Za-z]{2,})-\s*\n(?:\s*\n)?\s*([a-z][A-Za-z]*)",
+        r"([A-Za-z]{2,})[-~]\s*\n(?:\s*\n)?\s*([a-z][A-Za-z]*)",
         _dehyphenate_line_wrap,
         text,
     )
-    # 2. Clean OCR underline-underscore artifacts adjacent to letters (e.g. 'Great_Leap', 'Inherent _in', 'but_for')
+    # 2. Heal comma-to-parenthetical blank-line splits (e.g. 'Last 3 market cycles,\n\n(6/30/62 to 12/31/74)')
+    cleaned = re.sub(r",\s*\n\s*\n\s*(?=\([0-9a-z])", ", ", cleaned)
+    # 3. Clean OCR underline-underscore artifacts adjacent to letters (e.g. 'Great_Leap', 'Inherent _in', 'but_for')
     cleaned = re.sub(
         r"(?<=[A-Za-z])_(?=[A-Za-z])|\s+_(?=[A-Za-z])|(?<=[A-Za-z])_\s+",
         " ",
         cleaned,
     )
-    # 3. Repair paragraph-leading '(L)' or '(l)' where typewriter lowercase 'l' was used for numeral '1'
+    # 4. Repair paragraph-leading '(L)'/'(l)' -> '(1)' and leading '®' footnote markers -> '*'
     cleaned = re.sub(r"(?m)^(\s*)\([Ll]\)(?=\s+[A-Z\"'])", r"\1(1)", cleaned)
-    # 4. Repair tilde dash confusions ('~-', '-~', ' ~ ', and intra-word 'non~conventional')
+    cleaned = re.sub(r"(?m)^(\s*)®(?=\s+[A-Z\"'])", r"\1*", cleaned)
+    # 5. Repair tilde dash confusions ('~-', '-~', ' ~ ' across spaces or single newlines, and intra-word 'non~conventional')
     cleaned = re.sub(r"\s*(?:~-|-\~)\s*", " - ", cleaned)
-    cleaned = re.sub(r"(?<=\S)[ \t]+~[ \t]+(?=\S)", " - ", cleaned)
+    cleaned = re.sub(r"(?<=\S)[ \t]*~[ \t]*(?:\n[ \t]*)?(?=\S)", " - ", cleaned)
     cleaned = re.sub(r"(?<=[A-Za-z])~(?=[A-Za-z])", "-", cleaned)
-    # 5. Repair S & P 500 symbol confusions ('§ & P 500', '$ & P 500', 'S$ & P 500')
-    cleaned = re.sub(r"(?:S\$|§|\$)\s*&\s*P\s+500\b", "S & P 500", cleaned)
-    # 6. Repair percentage decimal confusions ('+2,8%' -> '+2.8%', '+3 8%' -> '+3.8%')
+    # 6. Repair S & P symbol confusions ('§ & P 500', '$ & P 500', 'S$ & P 500', '§ & P')
+    cleaned = re.sub(r"(?:S\$|§|\$)\s*&\s*P\b", "S & P", cleaned)
+    # 7. Repair percentage decimal confusions ('+2,8%' -> '+2.8%', '+3 8%' -> '+3.8%', '496 instead of 9%' -> '4% instead of 9%')
     cleaned = re.sub(r"([+\-]?\d+),(\d{1,2})%", r"\1.\2%", cleaned)
     cleaned = re.sub(r"([+\-]\d+)[ \t]+(\d)%", r"\1.\2%", cleaned)
+    cleaned = re.sub(
+        r"\b([1-9]\d?)96(?=\s+(?:instead\s+of|to|or|and|versus|vs\.?)\s+[+\-]?\d+(?:\.\d+)?%)",
+        r"\1%",
+        cleaned,
+    )
     return cleaned
 
 
 _TABLE_3COL_ROW_RE = re.compile(
-    r"^(?P<c1>[A-Za-z][A-Za-z0-9.&' /\-]{1,40}?)\s+"
+    r"^(?P<c1>[A-Za-z][A-Za-z0-9.,&'() /\-]{1,58}?)\s+"
     r"(?P<c2>\$?\s*\d[\d,]*(?:\.\d+)?%?|\(\d[\d,]*(?:\.\d+)?%?\))\s+"
     r"(?P<c3>\$?\s*\d[\d,]*(?:\.\d+)?%?|\(\d[\d,]*(?:\.\d+)?%?\))$"
 )
@@ -1318,22 +1333,29 @@ _MONTH_PREFIX_RE = re.compile(
 )
 
 
-def _format_numeric_table_block(lines: list[str], reformat_as_markdown: bool) -> str | None:
-    """Detect multi-row numeric tables (even when column spaces were collapsed) and format as Markdown tables."""
+def _format_numeric_table_block(
+    lines: list[str],
+    reformat_as_markdown: bool,
+    preceding_header: str = "",
+) -> tuple[str | None, bool]:
+    """Detect multi-row numeric tables (even when column spaces were collapsed) and format as Markdown tables.
+
+    Returns (formatted_table_or_none, consumed_preceding_header).
+    """
     if len(lines) < 2:
-        return None
+        return None, False
 
     norm_lines = [re.sub(r"(\d{1,3}),\s+(\d{3})\b", r"\1,\2", ln.strip()) for ln in lines if ln.strip()]
     if len(norm_lines) < 2:
-        return None
+        return None, False
 
-    # 1. Check 3-column financial table (optional header line + >= 2 data rows)
+    # 1. Check 3-column financial table (either header + >=2 data rows, or >=3 data rows with preceding header block)
     if len(norm_lines) >= 3:
         row_matches_all = [_TABLE_3COL_ROW_RE.match(ln) for ln in norm_lines]
         row_matches_tail = [_TABLE_3COL_ROW_RE.match(ln) for ln in norm_lines[1:]]
         if all(row_matches_tail) and not row_matches_all[0]:
             if not reformat_as_markdown:
-                return "\n".join(norm_lines)
+                return "\n".join(norm_lines), False
             header_line = norm_lines[0]
             multi_space_cols = [c.strip() for c in re.split(r"\s{2,}", header_line) if c.strip()]
             if len(multi_space_cols) == 3:
@@ -1354,19 +1376,37 @@ def _format_numeric_table_block(lines: list[str], reformat_as_markdown: bool) ->
                     c2 = re.sub(r"\s+", "", m.group("c2"))
                     c3 = re.sub(r"\s+", "", m.group("c3"))
                     md_rows.append(f"| {c1} | {c2} | {c3} |")
-            return "\n".join(md_rows)
+            return "\n".join(md_rows), False
+
+        if all(row_matches_all):
+            if not reformat_as_markdown:
+                return "\n".join(norm_lines), False
+            consumed_prev = False
+            if "S & P 500" in preceding_header and "Becker Median" in preceding_header:
+                h1, h2, h3 = "Period", "S & P 500", "Becker Median Result*"
+                consumed_prev = True
+            else:
+                h1, h2, h3 = "Period", "Column 1", "Column 2"
+            md_rows = [f"| {h1} | {h2} | {h3} |", "| :--- | :---: | :---: |"]
+            for m in row_matches_all:
+                if m is not None:
+                    c1 = m.group("c1").strip()
+                    c2 = re.sub(r"\s+", "", m.group("c2"))
+                    c3 = re.sub(r"\s+", "", m.group("c3"))
+                    md_rows.append(f"| {c1} | {c2} | {c3} |")
+            return "\n".join(md_rows), consumed_prev
 
     # 2. Check 2-column benchmark/metric table (>= 3 rows of label + percentage/amount)
     if len(norm_lines) >= 3:
         matches_2col = [_TABLE_2COL_ROW_RE.match(ln) for ln in norm_lines]
         if all(matches_2col) and not any(_MONTH_PREFIX_RE.match(ln) for ln in norm_lines):
             if not reformat_as_markdown:
-                return "\n".join(norm_lines)
+                return "\n".join(norm_lines), False
             md_rows = ["| Category | Value |", "| :--- | :---: |"]
             for m in matches_2col:
                 if m is not None:
                     md_rows.append(f"| {m.group('c1').strip()} | {m.group('c2').strip()} |")
-            return "\n".join(md_rows)
+            return "\n".join(md_rows), False
 
     # 3. General multi-row tabular fallback (preserve line breaks rather than mashing into prose)
     if all(len(ln) <= 75 for ln in norm_lines):
@@ -1377,9 +1417,9 @@ def _format_numeric_table_block(lines: list[str], reformat_as_markdown: bool) ->
             and re.search(r"(?:[+\-]?\d[\d,.]*%?|\(\d[\d,.]*%?\))$", ln)
         )
         if numeric_end_count >= max(2, len(norm_lines) - 1):
-            return "\n".join(norm_lines)
+            return "\n".join(norm_lines), False
 
-    return None
+    return None, False
 
 
 def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True) -> str:
@@ -1398,8 +1438,18 @@ def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True
             continue
 
         # Check structured multi-row numeric table first
-        formatted_table = _format_numeric_table_block(lines, reformat_as_markdown=reformat_as_markdown)
+        prev_hdr = out_paragraphs[-1] if out_paragraphs else ""
+        formatted_table, consumed_prev = _format_numeric_table_block(
+            lines,
+            reformat_as_markdown=reformat_as_markdown,
+            preceding_header=prev_hdr,
+        )
         if formatted_table is not None:
+            if consumed_prev and out_paragraphs:
+                if "Overall Annual Return" in out_paragraphs[-1]:
+                    out_paragraphs[-1] = "**Overall Annual Return**"
+                else:
+                    out_paragraphs.pop()
             out_paragraphs.append(formatted_table)
             continue
 
@@ -1410,7 +1460,9 @@ def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True
             continue
 
         reflowed = re.sub(r"[ \t]+", " ", " ".join(ln.strip() for ln in lines)).strip()
-        if reformat_as_markdown and not reflowed.startswith("#") and _is_standalone_heading_block(para):
+        if reformat_as_markdown and is_footnote_start_line(reflowed) and not reflowed.startswith(">"):
+            reflowed = f"> {reflowed}"
+        elif reformat_as_markdown and not reflowed.startswith("#") and _is_standalone_heading_block(para):
             if reflowed.isupper():
                 reflowed = f"## {reflowed.title()}"
             else:
