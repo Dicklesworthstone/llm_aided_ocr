@@ -191,55 +191,65 @@ pip install -r requirements.txt
 
 ## Usage
 
-1. Place your PDF file in the project directory.
+### Using the Command-Line Interface (`llm-aided-ocr-cli.py`)
 
-2. Update the `input_pdf_file_path` variable in the `main()` function with your PDF filename.
+```bash
+# Process a PDF file (default 300 DPI, Markdown output, strip running headers/page numbers)
+python llm-aided-ocr-cli.py 160301289-Warren-Buffett-Katharine-Graham-Letter.pdf
 
-3. Run the script:
-   ```
+# Process specific page ranges or override provider/model/output directory
+python llm-aided-ocr-cli.py document.pdf --provider openai --model gpt-4o-mini --dpi 300 --max-pages 5 --output-dir ./out
+
+# Process an already-extracted raw OCR text file without re-running Tesseract
+python llm-aided-ocr-cli.py --raw-ocr-input 160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt --output-dir ./out
+
+# Run a standalone deterministic content conservation audit (numeric recall, footnote retention, seam integrity)
+python llm-aided-ocr-cli.py --verify-only \
+  160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt \
+  160301289-Warren-Buffett-Katharine-Graham-Letter_llm_corrected.md
+```
+
+### Running `llm_aided_ocr.py` Directly
+
+1. Place your PDF file in the project directory (or pass parameters to `main()`).
+2. Run the script:
+   ```bash
    python llm_aided_ocr.py
    ```
-
-4. The script will generate several output files, including the final post-processed text.
+3. The script will generate `{base_name}__raw_ocr_output.txt` and `{base_name}_llm_corrected.md`, followed by a multi-sample and deterministic content conservation quality assessment.
 
 ## How It Works
 
 The LLM-Aided OCR project employs a multi-step process to transform raw OCR output into high-quality, readable text:
 
-1. **PDF Conversion**: Converts input PDF into images using `pdf2image`.
-
-2. **OCR**: Applies Tesseract OCR to extract text from images.
-
-3. **Text Chunking**: Splits the raw OCR output into manageable chunks for processing.
-
-4. **Error Correction**: Each chunk undergoes LLM-based processing to correct OCR errors and improve readability.
-
-5. **Markdown Formatting** (Optional): Reformats the corrected text into clean, consistent Markdown.
-
-6. **Quality Assessment**: An LLM-based evaluation compares the final output quality to the original OCR text.
-
-## Code Optimization
-
-- **Concurrent Processing**: When using API-based models, chunks are processed concurrently to improve speed.
-- **Context Preservation**: Each chunk includes a small overlap with the previous chunk to maintain context.
-- **Adaptive Token Management**: The system dynamically adjusts the number of tokens used for LLM requests based on input size and model constraints.
+1. **PDF Conversion**: Converts input PDF into images at configurable DPI (`PDF_DPI=300` by default) using `pdf2image`.
+2. **Document Image Preprocessing**: Applies grayscale conversion, safe deskewing (`deskew_image`), Contrast-Limited Adaptive Histogram Equalization (CLAHE), Gaussian denoising, and Otsu adaptive binarization before running Tesseract OCR.
+3. **Structural Page Cleaning & Footnote Preservation**: Deterministically strips OCR-mangled standalone page numbers (`-2-`, `-1O-`, `-LL-`, `~Li-`, `~L5-`) and repeating running headers while anchoring bottom-of-page author footnotes (`* ...`, `† ...`, `® ...`) so split sentences across page breaks join cleanly without losing footnotes.
+4. **Lossless Text Chunking**: Splits text into paragraph- and sentence-aligned chunks (`chunk_text` and `split_long_sentence`) with cached offline-safe tokenization (`tiktoken` `cl100k_base` fallback).
+5. **Two-Pass LLM Error Correction & Markdown Formatting**: Each chunk is corrected for OCR typos and formatted as Markdown using read-only `<previous_context>` tags, bounded async concurrency (`MAX_CONCURRENT_REQUESTS`), and exponential backoff retries.
+6. **Deterministic Seam Stitching (`stitch_chunks`)**: Aligns word sequences across chunk boundaries to strip any echoed overlap phrases or spurious mid-sentence heading markers.
+7. **Deterministic Conservation & Quality Assessment**: Evaluates start, middle, and end segments alongside `verify_content_conservation()` (numeric/financial token recall, footnote retention, seam integrity, and word-count conservation).
 
 ## Configuration
 
-The project uses a `.env` file for configuration. Key settings include:
+The project uses a `.env` file (or environment variables) for configuration. Key settings include:
 
-- `USE_LOCAL_LLM`: Set to `True` to use a local LLM, `False` for API-based LLMs.
-- `API_PROVIDER`: Choose between "OPENAI" or "CLAUDE".
+- `USE_LOCAL_LLM`: Set to `True` to use a local GGUF LLM via `llama-cpp-python`, `False` for API-based LLMs.
+- `API_PROVIDER`: Choose between `"OPENAI"` or `"CLAUDE"`.
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`: API keys for respective services.
 - `CLAUDE_MODEL_STRING`, `OPENAI_COMPLETION_MODEL`: Specify the model to use for each provider.
-- `LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS`: Set the context size for local LLMs.
+- `OPENAI_MAX_TOKENS`, `CLAUDE_MAX_TOKENS`: Context/output token budgets for API providers.
+- `LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS`: Context size for local LLMs (default `4096`).
+- `PDF_DPI`: PDF rendering resolution in DPI (default `300`).
+- `MAX_CONCURRENT_REQUESTS`: Maximum concurrent API requests during chunk processing (default `4`).
+- `API_MAX_RETRIES`, `API_RETRY_BASE_DELAY`: Retry settings for transient API errors.
 
 ## Output Files
 
-The script generates several output files:
+The script generates two primary output files:
 
 1. `{base_name}__raw_ocr_output.txt`: Raw OCR output from Tesseract.
-2. `{base_name}_llm_corrected.md`: Final LLM-corrected and formatted text.
+2. `{base_name}_llm_corrected.md`: Final LLM-corrected and stitched Markdown text.
 
 ## Limitations and Future Improvements
 

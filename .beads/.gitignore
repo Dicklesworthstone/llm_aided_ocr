@@ -1,0 +1,57 @@
+# Database
+*.db
+*.db-journal
+*.db-shm
+# -wal plus fsqlite 0.2+'s -wal-cert / -wal-cert-head durability sidecars
+*.db-wal*
+# fsqlite multi-process namespace sidecars (-fsqlite-ns-gate / -fsqlite-ns-use),
+# including the `.<db>.schema-migration-<run>.vacuum-*` copies left by
+# `br doctor migrate-schema` (#427)
+*-fsqlite-ns-gate
+*-fsqlite-ns-use
+*.vacuum-wal-cert*
+# fsqlite 0.3.6+ engine-upgrade bookkeeping written beside the database
+*.fsqlite-migration-state
+
+# Lock files
+.write.lock
+.write-waiters.lock/
+*.lock
+
+# Temporary
+last-touched
+*.tmp
+
+# Local history backups
+.br_history/
+
+# DB-family recovery artifacts (truncated WAL/SHM, quarantined sidecars)
+# — same lifecycle as .br_history/, written by recovery paths and
+# `br doctor --repair`. Recovery artifacts live under their own directory
+# rather than relying on the database globs above (#271).
+.br_recovery/
+
+# Sync state (local-only, per-machine)
+.sync.lock
+sync_base.jsonl
+
+# Merge artifacts (temporary files from 3-way merge)
+beads.base.jsonl
+beads.base.meta.json
+beads.left.jsonl
+beads.left.meta.json
+beads.right.jsonl
+beads.right.meta.json
+
+# Daemon runtime files
+daemon.lock
+daemon.log
+daemon.pid
+bd.sock
+sync-state.json
+
+# Worktree redirect file
+redirect
+
+# bv (beads viewer) lock file
+.bv.lock

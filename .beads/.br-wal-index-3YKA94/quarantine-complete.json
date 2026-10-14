@@ -1,0 +1,5 @@
+{
+  "schema_version": "br.wal_index.quarantine.v1",
+  "stage": "complete",
+  "retained_index": "/data/projects/llm_aided_ocr/.beads/.br-wal-index-3YKA94/poisoned-shm"
+}

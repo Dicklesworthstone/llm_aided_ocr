@@ -25,7 +25,7 @@ RUN <<EOT
 apt-get update
 apt-get install -y libgl1-mesa-glx bash-completion wget curl htop jq vim bash libaio-dev build-essential openssh-server openssh-client python3 python3-pip python3-venv bzip2
 apt-get install -y --no-install-recommends software-properties-common build-essential autotools-dev nfs-common pdsh cmake g++ gcc curl wget vim tmux emacs less unzip htop iftop iotop ca-certificates openssh-client openssh-server rsync iputils-ping net-tools sudo llvm-dev re2c
-sudo apt-get install -y tesseract-ocr
+sudo apt-get install -y tesseract-ocr poppler-utils
 add-apt-repository ppa:git-core/ppa -y
 apt-get install -y git libnuma-dev wget
 pip install pipx
@@ -39,11 +39,13 @@ sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd
 sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 sed -i 's/^\(\s*\)GSSAPIAuthentication yes/\1GSSAPIAuthentication no/' /etc/ssh/ssh_config
 sed -i "s/^#Port 22/Port ${SSH_PORT}/" /etc/ssh/sshd_config
-cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
-cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys2
-chmod 600 /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys2
-mkdir /var/run/sshd
+mkdir -p /root/.ssh
+if [ -f /root/.ssh/id_rsa.pub ]; then
+    cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
+    cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys2
+    chmod 600 /root/.ssh/authorized_keys /root/.ssh/authorized_keys2
+fi
+mkdir -p /var/run/sshd
 echo "root:${ROOT_PASSWD}" | chpasswd
 mkdir -p ~/.pip
 # install miniconda
@@ -81,8 +83,8 @@ source /opt/conda/etc/profile.d/conda.sh
 conda create -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} -y
 conda activate ${CONDA_ENV_NAME}
 git clone https://github.com/Dicklesworthstone/llm_aided_ocr
-git checkout ${BRANCH}
 cd llm_aided_ocr
+git checkout ${BRANCH}
 python -m pip install --upgrade pip
 python -m pip install wheel
 python -m pip install --upgrade setuptools wheel

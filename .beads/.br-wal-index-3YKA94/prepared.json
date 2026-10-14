@@ -1,0 +1,10 @@
+{
+  "schema_version": "br.wal_index.quarantine.v1",
+  "database_path": "/data/projects/llm_aided_ocr/.beads/beads.db",
+  "reason": "initialized-zero-page-wal-index",
+  "main_sha256": "cdc445a5634b689aed3c1b9cb6e2d77893ba727a32f26b715ffa32b4a60fa85c",
+  "wal_sha256": "fca7ba8120c4411d5006ee15c9db5525707ff395543b7300644a3de07e71dd4c",
+  "shm_sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+  "retained_index": "/data/projects/llm_aided_ocr/.beads/.br-wal-index-3YKA94/poisoned-shm",
+  "completion_marker": "quarantine-complete.json"
+}

@@ -10,11 +10,8 @@ services:
         CONDA_ENV_NAME: "llmocr"
         PYTHON_VERSION: "3.12"
         TAG_VERSION: "12.1.1"
-        USE_LOCAL_LLM: True
-        # API_PROVIDER: "OPENAI"
-        # OPENAI_API_KEY: "your_openai_api_key"
-        # ANTHROPIC_API_KEY: "your_anthropic_api_key"
-        LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS: ""
+        USE_LOCAL_LLM: "True"
+        LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS: "4096"
     volumes:
       - ./results:/results
     container_name: llm_aided_ocr
@@ -31,19 +28,19 @@ services:
     shm_size: '32gb'
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      # - NVIDIA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-    # network_mode: host
+      - USE_LOCAL_LLM=True
+      - LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS=4096
+      - PDF_DPI=300
     command: ["/usr/sbin/sshd", "-D"]
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              # count: all
+              count: all
               capabilities: ["gpu"]
-              device_ids: ["2"]
     ports:
-      - "3232:22"
+      - "3232:2323"
     networks:
       - bridge_network
 
