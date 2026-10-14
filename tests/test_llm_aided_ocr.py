@@ -623,3 +623,104 @@ def test_b19_ocr_comma_decimal_and_percent_96_conservation_on_buffett_sample():
     assert full_report["seam_anomalies"] == []
     assert full_report["deterministic_score"] == 100
 
+
+def test_b21_openai_client_tracks_runtime_key_updates_and_load_model_respects_prefer_gpu():
+    with patch.object(llm_aided_ocr, "OPENAI_API_KEY", "sk-first-valid-key-111"):
+        c1 = llm_aided_ocr.get_openai_client()
+        assert c1 is not None
+        assert llm_aided_ocr.openai_client is c1
+
+    with patch.object(llm_aided_ocr, "OPENAI_API_KEY", "sk-second-valid-key-222"):
+        c2 = llm_aided_ocr.get_openai_client()
+        assert c2 is not None
+        assert c2 is not c1
+        assert llm_aided_ocr.openai_client is c2
+
+    with patch.object(llm_aided_ocr, "OPENAI_API_KEY", "your-openai-api-key"):
+        assert llm_aided_ocr.get_openai_client() is None
+        assert llm_aided_ocr.openai_client is None
+
+    # Verify load_model() skips GPU init (n_gpu_layers=-1) when is_gpu_available() reports gpu_found=False
+    llm_aided_ocr.clear_model_cache()
+    models_dir = Path(llm_aided_ocr.__file__).resolve().parent / "models"
+    models_dir.mkdir(exist_ok=True)
+    dummy_path = models_dir / "test_b21_cpu_only.gguf"
+    created = False
+    if not dummy_path.exists():
+        dummy_path.write_bytes(b"GGUF-cpu")
+        created = True
+
+    seen_gpu_layers: list[int] = []
+
+    class _TrackingLlama:
+        def __init__(self, **kwargs):
+            seen_gpu_layers.append(int(kwargs.get("n_gpu_layers", 0)))
+
+    try:
+        with (
+            patch.object(llm_aided_ocr, "is_gpu_available", return_value={"gpu_found": False}),
+            patch.object(llm_aided_ocr, "Llama", _TrackingLlama),
+        ):
+            inst = llm_aided_ocr.load_model("test_b21_cpu_only.gguf")
+            assert inst is not None
+            assert seen_gpu_layers == [0]
+    finally:
+        llm_aided_ocr.clear_model_cache()
+        if created and dummy_path.exists():
+            dummy_path.unlink()
+
+
+def test_b22_intra_page_and_non_footnote_inter_page_mid_sentence_healing():
+    raw_text = RAW_OCR_PATH.read_text(encoding="utf-8")
+    pages = [p for p in raw_text.split("\x0c") if p.strip()]
+    cleaned_pages = llm_aided_ocr.clean_page_artifacts(pages, suppress_headers_and_page_numbers=True)
+    cleaned_full = "\n\n".join(cleaned_pages)
+
+    # 1. Intra-page mid-sentence blank lines and hyphenations ('mar-\n\nket', 'prices go\n\ninto a power dive.)') are healed
+    assert "selling in the market for the price of 300 motor cars." in cleaned_full
+    assert "Almost all past investments\nwere nearly worthless" in cleaned_full
+    assert "prices go\ninto a power dive.)" in cleaned_full
+
+    # 2. Non-footnote mid-sentence page breaks (Pages 4->5, 5->6, 7->8, 12->13, 16->17) are healed
+    assert "favorable businesses under such circumstances." in cleaned_full
+    assert "accumulating and investment management operation" in cleaned_full
+    assert "strengths of the old methods. But when the trickle" in cleaned_full
+    assert "quite explicitly embodying the principle that no management" in cleaned_full
+    assert "100 cents on the dollar, and a reasonable batting average" in cleaned_full
+
+    # 3. Multi-fragment footnotes in raw OCR (split by internal blank lines on Pages 2, 9, 18) are reassembled in extract_footnotes()
+    fns = llm_aided_ocr.extract_footnotes(raw_text)
+    assert len(fns) == 7
+    assert any("reluctant to correct accordingly." in fn for fn in fns)
+    assert any("batting cross-handed." in fn for fn in fns)
+    assert any("command over fund investments in this area." in fn for fn in fns)
+
+
+@pytest.mark.asyncio
+async def test_b23_title_case_headings_and_underline_underscore_cleanup_in_no_llm_mode():
+    raw_text = await asyncio.to_thread(RAW_OCR_PATH.read_text, encoding="utf-8")
+    pages = [p for p in raw_text.split("\x0c") if p.strip()]
+    out = await llm_aided_ocr.process_document(
+        pages,
+        reformat_as_markdown=True,
+        suppress_headers_and_page_numbers=True,
+        use_llm=False,
+    )
+
+    # Title-case and split headings are promoted to ## headings without false positives on 'Annual Compounded Rate of'
+    assert "## Pensions" in out
+    assert "## The Irreversible Nature of Pension Promises" in out
+    assert '## The "Earthquake Risk"' in out
+    assert "## The Investment Management Problem Inherent in All Pension Plans" in out
+    assert "## The History of Corporate Pension Plan Management" in out
+    assert "## Act One - The Awakening" in out
+    assert "## Act Two - The Great Leap" in out
+    assert "## Major Options in Pension Fund Management" in out
+    assert "## Annual Compounded Rate of" not in out
+
+    # Underline-underscore OCR artifacts ('Inherent _in', 'Great_Leap', 'but_for') are cleaned
+    assert "Inherent _in" not in out
+    assert "Great_Leap" not in out
+    assert "but_for" not in out
+    assert "but for which nothing should be paid at the time of purchase." in out
+

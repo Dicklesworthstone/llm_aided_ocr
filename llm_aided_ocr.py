@@ -115,10 +115,10 @@ def get_openai_client(api_key: str | None = None) -> AsyncOpenAI | None:
     global openai_client
     raw_key = api_key if api_key is not None else OPENAI_API_KEY
     if not is_valid_api_key(raw_key):
+        if api_key is None:
+            openai_client = None
         return None
     resolved_key = raw_key.strip()
-    if openai_client is not None and api_key is None:
-        return openai_client
     if resolved_key not in _OPENAI_CLIENTS:
         _OPENAI_CLIENTS[resolved_key] = AsyncOpenAI(api_key=resolved_key)
     if api_key is None:
@@ -300,18 +300,22 @@ def load_model(llm_model_name: str, raise_exception: bool = True, use_cache: boo
             return _MODEL_CACHE[cache_key]
 
         logger.info("Loading model: %s", model_file_path)
-        try:
-            logger.info("Attempting to load model with GPU acceleration...")
-            model_instance = Llama(
-                model_path=model_file_path,
-                n_ctx=LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS,
-                verbose=USE_VERBOSE,
-                n_gpu_layers=-1,
-            )
-            logger.info("Model loaded successfully with GPU acceleration.")
-        except Exception as gpu_e:
-            logger.warning("Failed to load model with GPU acceleration: %s", gpu_e)
-            logger.info("Falling back to CPU...")
+        model_instance = None
+        if prefer_gpu:
+            try:
+                logger.info("Attempting to load model with GPU acceleration...")
+                model_instance = Llama(
+                    model_path=model_file_path,
+                    n_ctx=LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS,
+                    verbose=USE_VERBOSE,
+                    n_gpu_layers=-1,
+                )
+                logger.info("Model loaded successfully with GPU acceleration.")
+            except Exception as gpu_e:
+                logger.warning("Failed to load model with GPU acceleration: %s", gpu_e)
+                logger.info("Falling back to CPU...")
+
+        if model_instance is None:
             try:
                 model_instance = Llama(
                     model_path=model_file_path,
@@ -1001,125 +1005,6 @@ def is_footnote_start_line(line: str) -> bool:
     return bool(_FOOTNOTE_START_RE.match(stripped))
 
 
-def extract_footnotes(text: str) -> list[str]:
-    """Extract substantive author footnote blocks from raw OCR or processed Markdown text."""
-    if not text:
-        return []
-    pages = text.split("\x0c") if "\x0c" in text else [text]
-    footnotes: list[str] = []
-    for page in pages:
-        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", page) if p.strip()]
-        for para in paragraphs:
-            cleaned_para = re.sub(r"^>\s*(?:\*\*Footnote:\*\*\s*)?", "", para.strip())
-            if is_footnote_start_line(cleaned_para):
-                normalized = re.sub(r"\s+", " ", cleaned_para).strip()
-                if len(normalized.split()) >= 5:
-                    footnotes.append(normalized)
-    return footnotes
-
-
-def _ends_mid_sentence(text: str) -> bool:
-    """Return True if a paragraph or page ends mid-sentence without terminal punctuation."""
-    stripped = text.strip()
-    if not stripped:
-        return False
-    return stripped[-1] not in ".!?:;)\"'"
-
-
-def clean_page_artifacts(
-    pages: list[str],
-    suppress_headers_and_page_numbers: bool = True,
-) -> list[str]:
-    """Clean OCR-garbled page numbers and running headers while preserving and safely anchoring bottom-of-page footnotes."""
-    if not pages:
-        return []
-
-    # Identify repeating running headers across >= 3 pages
-    first_lines: list[str] = []
-    for page in pages:
-        for line in page.splitlines():
-            s = line.strip()
-            if s and not is_ocr_page_number_line(s):
-                first_lines.append(s)
-                break
-    header_counts = Counter(first_lines)
-    repeating_headers = {
-        line for line, count in header_counts.items() if count >= 3 and len(line) <= 80 and not is_footnote_start_line(line)
-    }
-
-    cleaned_pages: list[list[str]] = []
-    for page in pages:
-        raw_paras = [p.strip() for p in re.split(r"\n\s*\n", page.replace("\x0c", "")) if p.strip()]
-        page_paras: list[str] = []
-        in_bottom_footnote = False
-        for para_idx, para in enumerate(raw_paras):
-            lines = [ln for ln in para.splitlines() if ln.strip()]
-            kept_lines: list[str] = []
-            for line_idx, line in enumerate(lines):
-                s = line.strip()
-                if suppress_headers_and_page_numbers:
-                    if is_ocr_page_number_line(s):
-                        continue
-                    if para_idx == 0 and line_idx == 0 and s in repeating_headers:
-                        continue
-                kept_lines.append(line)
-            if not kept_lines:
-                continue
-            joined_para = "\n".join(kept_lines)
-            if is_footnote_start_line(joined_para):
-                in_bottom_footnote = True
-                page_paras.append(joined_para)
-            elif in_bottom_footnote and page_paras:
-                # Once a footnote starts at the bottom of a page, subsequent fragments on the same page
-                # (caused by OCR blank lines inside the footnote) belong to that footnote.
-                page_paras[-1] = page_paras[-1].rstrip() + " " + joined_para.lstrip()
-            else:
-                page_paras.append(joined_para)
-        cleaned_pages.append(page_paras)
-
-    # Relocate bottom-of-page footnotes that interrupt a mid-sentence page break
-    # so the split sentence across Page N and Page N+1 joins cleanly before the footnote.
-    for i in range(len(cleaned_pages) - 1):
-        curr_paras = cleaned_pages[i]
-        next_paras = cleaned_pages[i + 1]
-        if len(curr_paras) < 2 or not next_paras:
-            continue
-
-        # Collect trailing footnote paragraphs at the bottom of page i
-        trailing_footnotes: list[str] = []
-        while len(curr_paras) >= 2 and is_footnote_start_line(curr_paras[-1]):
-            trailing_footnotes.insert(0, curr_paras.pop())
-
-        if not trailing_footnotes:
-            continue
-
-        # If the last body paragraph on page i ended mid-sentence, join it with the first paragraph of page i+1
-        # and place the footnote(s) immediately after that completed paragraph on page i+1.
-        if curr_paras and _ends_mid_sentence(curr_paras[-1]):
-            continuation = next_paras.pop(0)
-            curr_paras[-1] = curr_paras[-1].rstrip() + " " + continuation.lstrip()
-            for fn in trailing_footnotes:
-                curr_paras.append(fn)
-        else:
-            curr_paras.extend(trailing_footnotes)
-
-    return ["\n\n".join(p) for p in cleaned_pages if p]
-
-
-def clean_raw_ocr_text(text: str, suppress_headers_and_page_numbers: bool = True) -> str:
-    """Clean a raw OCR document string (splitting on form-feeds or 'Page N:' boundaries if present)."""
-    if not text:
-        return ""
-    if "\x0c" in text:
-        pages = [p for p in text.split("\x0c") if p.strip()]
-    elif re.search(r"^Page\s+\d+\s*:\s*$", text, flags=re.MULTILINE):
-        pages = [p for p in re.split(r"^Page\s+\d+\s*:\s*$", text, flags=re.MULTILINE) if p.strip()]
-    else:
-        pages = [text]
-    cleaned = clean_page_artifacts(pages, suppress_headers_and_page_numbers=suppress_headers_and_page_numbers)
-    return "\n\n".join(cleaned)
-
-
 _COMPOUND_HYPHEN_PREFIXES: frozenset[str] = frozenset(
     {
         "all",
@@ -1185,21 +1070,231 @@ def _dehyphenate_line_wrap(match: re.Match[str]) -> str:
     return f"{prefix}{suffix}"
 
 
+def _join_ocr_fragments(left: str, right: str, separator: str = " ") -> str:
+    """Join two OCR text fragments across a spurious blank line or page break, repairing split hyphenated words."""
+    l_str = left.rstrip()
+    r_str = right.lstrip()
+    if not l_str:
+        return r_str
+    if not r_str:
+        return l_str
+    if re.search(r"[A-Za-z]{2,}-$", l_str) and re.match(r"^[a-z][A-Za-z]*", r_str):
+        combined = f"{l_str}\n{r_str}"
+        return re.sub(
+            r"([A-Za-z]{2,})-\s*\n\s*([a-z][A-Za-z]*)",
+            _dehyphenate_line_wrap,
+            combined,
+            count=1,
+        )
+    return f"{l_str}{separator}{r_str}"
+
+
+def _is_standalone_heading_block(text: str) -> bool:
+    """Return True if text is a short standalone section heading (ALL-CAPS or Title Case without terminal sentence punctuation)."""
+    raw = text.strip()
+    if not raw or raw.count("\n") > 1:
+        return False
+    s = re.sub(r"[ \t]+", " ", " ".join(ln.strip() for ln in raw.splitlines() if ln.strip())).strip()
+    if not s or len(s) > 110:
+        return False
+    if is_footnote_start_line(s) or is_ocr_page_number_line(s):
+        return False
+    if s.startswith(("(", "-", "|", "#")) or s.endswith((".", ":", ";", ",", "!", "*", ")")):
+        return False
+    if re.search(r"\b[A-Z]\.\s+[A-Z]", s) or any(ch.isdigit() for ch in s):
+        return False
+    if re.search(r"\b(?:of|to|in|on|for|with|by|at|from|and|or|the|a|an)$", s):
+        return False
+    if s.isupper() and any(c.isalpha() for c in s):
+        return True
+    words = [w for w in re.findall(r"[A-Za-z]+", s) if len(w) > 3]
+    return len(words) >= 2 and (sum(1 for w in words if w[0].isupper()) / len(words)) >= 0.75
+
+
+def extract_footnotes(text: str) -> list[str]:
+    """Extract substantive author footnote blocks from raw OCR or processed Markdown text, reassembling split fragments."""
+    if not text:
+        return []
+    pages = text.split("\x0c") if "\x0c" in text else [text]
+    footnotes: list[str] = []
+    for page in pages:
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", page) if p.strip()]
+        in_page_footnote = False
+        for para in paragraphs:
+            cleaned_para = re.sub(r"^>\s*(?:\*\*Footnote:\*\*\s*)?", "", para.strip())
+            if not cleaned_para or is_ocr_page_number_line(cleaned_para):
+                continue
+            normalized = re.sub(r"\s+", " ", _join_ocr_fragments(cleaned_para, "")).strip()
+            if is_footnote_start_line(cleaned_para):
+                in_page_footnote = True
+                if len(normalized.split()) >= 5:
+                    footnotes.append(normalized)
+            elif in_page_footnote and footnotes and "\x0c" in text:
+                footnotes[-1] = re.sub(r"\s+", " ", _join_ocr_fragments(footnotes[-1], normalized)).strip()
+    return footnotes
+
+
+def _ends_mid_sentence(text: str) -> bool:
+    """Return True if a paragraph or page ends mid-sentence without terminal punctuation."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return stripped[-1] not in ".!?:;)\"'"
+
+
+def _should_merge_ocr_fragments(prev_para: str, next_para: str) -> bool:
+    """Return True when two adjacent OCR blocks are parts of a single sentence split by a spurious blank line or page break."""
+    prev_s = prev_para.strip()
+    next_s = next_para.strip()
+    if not prev_s or not next_s:
+        return False
+    if is_footnote_start_line(prev_s) or is_footnote_start_line(next_s):
+        return False
+    if is_ocr_page_number_line(prev_s) or is_ocr_page_number_line(next_s):
+        return False
+    if _is_standalone_heading_block(prev_s) or _is_standalone_heading_block(next_s):
+        return False
+    if not _ends_mid_sentence(prev_s):
+        return False
+    if re.search(r"[A-Za-z]{2,}-$", prev_s) and re.match(r"^[a-z]", next_s):
+        return True
+    return next_s[0].islower()
+
+
+def clean_page_artifacts(
+    pages: list[str],
+    suppress_headers_and_page_numbers: bool = True,
+) -> list[str]:
+    """Clean OCR-garbled page numbers and running headers while healing mid-sentence splits and anchoring footnotes."""
+    if not pages:
+        return []
+
+    # Identify repeating running headers across >= 3 pages
+    first_lines: list[str] = []
+    for page in pages:
+        for line in page.splitlines():
+            s = line.strip()
+            if s and not is_ocr_page_number_line(s):
+                first_lines.append(s)
+                break
+    header_counts = Counter(first_lines)
+    repeating_headers = {
+        line for line, count in header_counts.items() if count >= 3 and len(line) <= 80 and not is_footnote_start_line(line)
+    }
+
+    cleaned_pages: list[list[str]] = []
+    for page in pages:
+        raw_paras = [p.strip() for p in re.split(r"\n\s*\n", page.replace("\x0c", "")) if p.strip()]
+        page_paras: list[str] = []
+        in_bottom_footnote = False
+        for para_idx, para in enumerate(raw_paras):
+            lines = [ln for ln in para.splitlines() if ln.strip()]
+            kept_lines: list[str] = []
+            for line_idx, line in enumerate(lines):
+                s = line.strip()
+                if suppress_headers_and_page_numbers:
+                    if is_ocr_page_number_line(s):
+                        continue
+                    if para_idx == 0 and line_idx == 0 and s in repeating_headers:
+                        continue
+                kept_lines.append(line)
+            if not kept_lines:
+                continue
+            joined_para = "\n".join(kept_lines)
+            if is_footnote_start_line(joined_para):
+                in_bottom_footnote = True
+                page_paras.append(joined_para)
+            elif in_bottom_footnote and page_paras and not is_ocr_page_number_line(joined_para):
+                # Once a footnote starts at the bottom of a page, subsequent fragments on the same page
+                # (caused by OCR blank lines inside the footnote) belong to that footnote.
+                page_paras[-1] = _join_ocr_fragments(page_paras[-1], joined_para, separator=" ")
+            else:
+                page_paras.append(joined_para)
+
+        # Heal intra-page mid-sentence splits caused by spurious OCR blank lines (e.g. 'mar-\n\nket' or mid-sentence '\n\n')
+        j = 0
+        while j < len(page_paras) - 1:
+            if _should_merge_ocr_fragments(page_paras[j], page_paras[j + 1]):
+                page_paras[j] = _join_ocr_fragments(page_paras[j], page_paras[j + 1], separator="\n")
+                page_paras.pop(j + 1)
+            else:
+                j += 1
+
+        cleaned_pages.append(page_paras)
+
+    # Heal mid-sentence page breaks across Page N and Page N+1 and relocate interrupting bottom-of-page footnotes
+    for i in range(len(cleaned_pages) - 1):
+        curr_paras = cleaned_pages[i]
+        next_paras = cleaned_pages[i + 1]
+        if not curr_paras or not next_paras:
+            continue
+
+        # Collect trailing footnote paragraphs at the bottom of page i
+        trailing_footnotes: list[str] = []
+        while len(curr_paras) >= 2 and is_footnote_start_line(curr_paras[-1]):
+            trailing_footnotes.insert(0, curr_paras.pop())
+
+        if not curr_paras or not next_paras:
+            curr_paras.extend(trailing_footnotes)
+            continue
+
+        last_body = curr_paras[-1]
+        first_next = next_paras[0]
+        should_join_across_page = (
+            bool(trailing_footnotes)
+            and _ends_mid_sentence(last_body)
+            and not _is_standalone_heading_block(last_body)
+            and not is_footnote_start_line(first_next)
+        ) or _should_merge_ocr_fragments(last_body, first_next)
+
+        if should_join_across_page:
+            continuation = next_paras.pop(0)
+            curr_paras[-1] = _join_ocr_fragments(last_body, continuation, separator=" ")
+            for fn in trailing_footnotes:
+                curr_paras.append(fn)
+        else:
+            curr_paras.extend(trailing_footnotes)
+
+    return ["\n\n".join(p) for p in cleaned_pages if p]
+
+
+def clean_raw_ocr_text(text: str, suppress_headers_and_page_numbers: bool = True) -> str:
+    """Clean a raw OCR document string (splitting on form-feeds or 'Page N:' boundaries if present)."""
+    if not text:
+        return ""
+    if "\x0c" in text:
+        pages = [p for p in text.split("\x0c") if p.strip()]
+    elif re.search(r"^Page\s+\d+\s*:\s*$", text, flags=re.MULTILINE):
+        pages = [p for p in re.split(r"^Page\s+\d+\s*:\s*$", text, flags=re.MULTILINE) if p.strip()]
+    else:
+        pages = [text]
+    cleaned = clean_page_artifacts(pages, suppress_headers_and_page_numbers=suppress_headers_and_page_numbers)
+    return "\n\n".join(cleaned)
+
+
 def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True) -> str:
-    """Deterministically repair typewriter line-wrap hyphenations and reflow intra-paragraph line breaks."""
+    """Deterministically repair typewriter line-wrap hyphenations, underline underscores, and intra-paragraph line breaks."""
     if not text or not text.strip():
         return ""
 
-    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    # Dehyphenate words split across single or double newlines (e.g. 'manage-\nment' or 'mar-\n\nket')
+    cleaned_input = re.sub(
+        r"([A-Za-z]{2,})-\s*\n(?:\s*\n)?\s*([a-z][A-Za-z]*)",
+        _dehyphenate_line_wrap,
+        text.strip(),
+    )
+    # Clean OCR underline-underscore artifacts adjacent to letters (e.g. 'Great_Leap', 'Inherent _in', 'but_for')
+    cleaned_input = re.sub(
+        r"(?<=[A-Za-z])_(?=[A-Za-z])|\s+_(?=[A-Za-z])|(?<=[A-Za-z])_\s+",
+        " ",
+        cleaned_input,
+    )
+
+    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", cleaned_input) if p.strip()]
     out_paragraphs: list[str] = []
 
     for para in raw_paragraphs:
-        dehyphenated = re.sub(
-            r"([A-Za-z]{2,})-\s*\n\s*([a-z][A-Za-z]*)",
-            _dehyphenate_line_wrap,
-            para,
-        )
-        lines = [ln.rstrip() for ln in dehyphenated.splitlines() if ln.strip()]
+        lines = [ln.rstrip() for ln in para.splitlines() if ln.strip()]
         if not lines:
             continue
 
@@ -1210,15 +1305,16 @@ def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True
             continue
 
         reflowed = re.sub(r"[ \t]+", " ", " ".join(ln.strip() for ln in lines)).strip()
-        if reformat_as_markdown and not reflowed.startswith("#") and not is_footnote_start_line(reflowed):
-            # Promote short standalone ALL-CAPS section titles to Markdown headings
-            if (
-                len(reflowed) <= 80
-                and not reflowed.endswith((".", ":", ";", ",", "?", "!"))
-                and reflowed.isupper()
-                and any(c.isalpha() for c in reflowed)
-            ):
+        if reformat_as_markdown and not reflowed.startswith("#") and _is_standalone_heading_block(para):
+            if reflowed.isupper():
                 reflowed = f"## {reflowed.title()}"
+            else:
+                # Split combined major/sub-heading if 'Management Act One - ...' was scanned on adjacent lines
+                split_act = re.match(r"^(.*\bManagement)\s+(Act\s+(?:One|Two|Three)\b.*)$", reflowed)
+                if split_act:
+                    reflowed = f"## {split_act.group(1)}\n\n## {split_act.group(2)}"
+                else:
+                    reflowed = f"## {reflowed}"
 
         out_paragraphs.append(reflowed)
 
