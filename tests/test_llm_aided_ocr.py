@@ -878,7 +878,7 @@ async def test_b32_typewriter_lexical_and_fraction_repairs_on_buffett_letter():
     assert "or (1) and (4), but (4) and (5)" in out
     assert "45-degree angle" in out
     assert '"manufactured" the record.' in out
-    assert "criticism, let alone Litigation. On the other hand, if" in out
+    assert "criticism, let alone litigation. On the other hand, if" in out
     assert "above average pension fund management is very close to nil." in out
     for garbled in ("finaneial", "eurrent", "elient", "eriticism", "becone", "amually", "managenient", "eLetralone", "4#S-degree"):
         assert garbled not in out
@@ -887,3 +887,57 @@ async def test_b32_typewriter_lexical_and_fraction_repairs_on_buffett_letter():
     assert metrics["missing_numbers"] == []
     assert abs(metrics["numeric_recall"] - 1.0) < 1e-6
     assert metrics["deterministic_score"] == 100
+
+
+@pytest.mark.asyncio
+async def test_b34_mid_sentence_dollar_pronoun_and_table_title_healing():
+    raw_text = await asyncio.to_thread(RAW_OCR_PATH.read_text, encoding="utf-8")
+    pages = [p for p in raw_text.split("\x0c") if p.strip()]
+    out = await llm_aided_ocr.process_document(
+        pages,
+        reformat_as_markdown=True,
+        suppress_headers_and_page_numbers=True,
+        use_llm=False,
+    )
+
+    # 1. Mid-sentence '$20 billion' continuation and 'luck, I believe' continuation are merged seamlessly
+    assert "Furthermore, you just don't move $20 billion or any significant fraction around easily" in out
+    assert "In addition to the ones benefitting from short-term luck, I believe it possible" in out
+
+    # 2. Split table title 'Annual Compounded Rate of\n\nReturn (including Dividends)' is merged and bolded above Bank Performance table
+    assert "**Annual Compounded Rate of Return (including Dividends)**" in out
+
+
+@pytest.mark.asyncio
+async def test_b35_typewriter_punctuation_speck_terminal_comma_and_capitalization_cleaner():
+    raw_text = await asyncio.to_thread(RAW_OCR_PATH.read_text, encoding="utf-8")
+    pages = [p for p in raw_text.split("\x0c") if p.strip()]
+    out = await llm_aided_ocr.process_document(
+        pages,
+        reformat_as_markdown=True,
+        suppress_headers_and_page_numbers=True,
+        use_llm=False,
+    )
+
+    # 1. Ink-speck periods ('impact. in', 'several. decades'), '* , ' footnote commas, and 'management .)' are cleaned
+    assert "same impact in future earnings" in out
+    assert "default several decades ago" in out
+    assert "> * My views regarding inflation" in out
+    assert "in-house management.)" in out
+
+    # 2. Paragraph-terminal commas on completed prose paragraphs are repaired to periods
+    assert "render any residual rights to terminate moot." in out
+    assert "buying bonds or the general run of common stocks." in out
+
+    # 3. Mid-sentence typewriter L/F capitalization confusions are normalized to lowercase
+    for phrase in (
+        "embody language unequivocally",
+        "impact future values",
+        "too large a portion",
+        "funds of large corporations",
+        "be little reason",
+        "anything like a 45-degree",
+        "borrow long-term against",
+        "let alone litigation.",
+    ):
+        assert phrase in out

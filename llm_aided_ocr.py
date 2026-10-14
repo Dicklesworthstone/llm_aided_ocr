@@ -1155,7 +1155,16 @@ def _should_merge_ocr_fragments(prev_para: str, next_para: str) -> bool:
         return False
     if re.search(r"[A-Za-z]{2,}[-~]$", prev_s) and re.match(r"^[a-z]", next_s):
         return True
-    if prev_s.endswith(",") and re.match(r"^\([0-9a-z]", next_s):
+    if prev_s.endswith(",") and re.match(r"^(?:\([0-9a-z]|I\s+[a-z])", next_s):
+        return True
+    if re.search(r"[a-z]$", prev_s) and re.match(r"^\$\d", next_s):
+        return True
+    if (
+        len(prev_s) <= 50
+        and re.search(r"\b(?:of|to|in|for|on|with|by)$", prev_s)
+        and len(next_s) <= 50
+        and re.match(r"^[A-Z][A-Za-z ()]+$", next_s)
+    ):
         return True
     return next_s[0].islower()
 
@@ -1276,27 +1285,19 @@ def clean_raw_ocr_text(text: str, suppress_headers_and_page_numbers: bool = True
     return "\n\n".join(cleaned)
 
 
-_TYPEWRITER_WORD_SUBSTITUTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bfinaneial\b"), "financial"),
-    (re.compile(r"\beurrent\b"), "current"),
-    (re.compile(r"\belient\b"), "client"),
-    (re.compile(r"\beriticism\b"), "criticism"),
-    (re.compile(r"\bete\."), "etc."),
-    (re.compile(r"\bbecone\b"), "become"),
-    (re.compile(r"\bamually\b"), "annually"),
-    (re.compile(r"\banalagous\b"), "analogous"),
-    (re.compile(r"fund:-managenient\."), "fund management"),
-    (re.compile(r"\bmanagenient\b"), "management"),
-    (re.compile(r",eLetralone\b"), ", let alone"),
-    (re.compile(r"\bIna\b"), "In a"),
-    (re.compile(r"\bfo(\s+control\b)"), r"To\1"),
-    (re.compile(r"\bgood(\s+)fer\b"), r"good\1for"),
-    (re.compile(r"\bpaths(\s+)ean\b"), r"paths\1can"),
-    (re.compile(r"\bin(\s+the\s+)hank\""), r'in\1"bank"'),
-    (re.compile(r"[‘'\"]t(manufactured)[”\"]"), r'"\1"'),
-    (re.compile(r"\b4#[Ss]-degree\b"), "45-degree"),
-    (re.compile(r"\bC(\d)\)"), r"(\1)"),
-    (re.compile(r",:if\b"), ", if"),
+_TYPEWRITER_EXACT_WORD_MAP: dict[str, str] = {
+    "finaneial": "financial",
+    "eurrent": "current",
+    "elient": "client",
+    "eriticism": "criticism",
+    "becone": "become",
+    "amually": "annually",
+    "analagous": "analogous",
+    "managenient": "management",
+    "Ina": "In a",
+}
+_TYPEWRITER_EXACT_WORD_RE = re.compile(
+    r"\b(?:finaneial|eurrent|elient|eriticism|becone|amually|analagous|managenient|Ina)\b"
 )
 
 
@@ -1313,17 +1314,19 @@ def clean_ocr_character_confusions(text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
-    # 2. Heal comma-to-parenthetical blank-line splits (e.g. 'Last 3 market cycles,\n\n(6/30/62 to 12/31/74)')
-    cleaned = re.sub(r",\s*\n\s*\n\s*(?=\([0-9a-z])", ", ", cleaned)
+    # 2. Heal comma-to-parenthetical / 'I <verb>' / mid-sentence '$<digit>' blank-line splits
+    cleaned = re.sub(r",\s*\n\s*\n\s*(?=(?:\([0-9a-z]|I\s+[a-z]))", ", ", cleaned)
+    cleaned = re.sub(r"(?<=[a-z])\s*\n\s*\n\s*(?=\$\d)", " ", cleaned)
     # 3. Clean OCR underline-underscore artifacts adjacent to letters (e.g. 'Great_Leap', 'Inherent _in', 'but_for')
     cleaned = re.sub(
         r"(?<=[A-Za-z])_(?=[A-Za-z])|\s+_(?=[A-Za-z])|(?<=[A-Za-z])_\s+",
         " ",
         cleaned,
     )
-    # 4. Repair paragraph-leading '(L)'/'(l)' -> '(1)' and leading '®' footnote markers -> '*'
+    # 4. Repair paragraph-leading '(L)'/'(l)' -> '(1)', leading '®' -> '*', and footnote '* , ' -> '* '
     cleaned = re.sub(r"(?m)^(\s*)\([Ll]\)(?=\s+[A-Z\"'])", r"\1(1)", cleaned)
     cleaned = re.sub(r"(?m)^(\s*)®(?=\s+[A-Z\"'])", r"\1*", cleaned)
+    cleaned = re.sub(r"(?m)^(\s*(?:>\s*)?\*)\s*,\s+", r"\1 ", cleaned)
     # 5. Repair tilde dash confusions ('~-', '-~', ' ~ ' across spaces or single newlines, and intra-word 'non~conventional')
     cleaned = re.sub(r"\s*(?:~-|-\~)\s*", " - ", cleaned)
     cleaned = re.sub(r"(?<=\S)[ \t]*~[ \t]*(?:\n[ \t]*)?(?=\S)", " - ", cleaned)
@@ -1339,9 +1342,26 @@ def clean_ocr_character_confusions(text: str) -> str:
         cleaned,
     )
     cleaned = re.sub(r"\$(\d+)%(?=\s+(?:million|billion)\b)", r"$\1.5", cleaned)
-    # 8. Repair unambiguous typewriter c->e / m->n / strikeover lexical confusions
-    for pattern, replacement in _TYPEWRITER_WORD_SUBSTITUTIONS:
-        cleaned = pattern.sub(replacement, cleaned)
+    # 8. Repair unambiguous typewriter c->e / m->n / strikeover / punctuation speckle confusions
+    cleaned = re.sub(r"fund:-managenient\.", "fund management", cleaned)
+    cleaned = _TYPEWRITER_EXACT_WORD_RE.sub(lambda m: _TYPEWRITER_EXACT_WORD_MAP[m.group(0)], cleaned)
+    cleaned = re.sub(r"\bete\.", "etc.", cleaned)
+    cleaned = re.sub(r",eLetralone\b", ", let alone", cleaned)
+    cleaned = re.sub(r"\bfo(\s+control\b)", r"To\1", cleaned)
+    cleaned = re.sub(r"\bgood(\s+)fer\b", r"good\1for", cleaned)
+    cleaned = re.sub(r"\bpaths(\s+)ean\b", r"paths\1can", cleaned)
+    cleaned = re.sub(r'\bin(\s+the\s+)hank"', r'in\1"bank"', cleaned)
+    cleaned = re.sub(r"[‘'\"]t(manufactured)[”\"]", r'"\1"', cleaned)
+    cleaned = re.sub(r"\b4#[Ss]-degree\b", "45-degree", cleaned)
+    cleaned = re.sub(r"\bC(\d)\)", r"(\1)", cleaned)
+    cleaned = re.sub(r",:if\b", ", if", cleaned)
+    cleaned = re.sub(r"[ \t]+\.\)", ".)", cleaned)
+    cleaned = re.sub(r"\b(impact|several)\.\s+(?=[a-z])", r"\1 ", cleaned)
+    cleaned = re.sub(
+        r"(?<=[a-z]\s)(Like|Large|Little|Long-term|Litigation|Language|Future)\b",
+        lambda m: m.group(1).lower(),
+        cleaned,
+    )
     return cleaned
 
 
@@ -1429,11 +1449,12 @@ def _format_numeric_table_block(
         if all(matches_2col) and not any(_MONTH_PREFIX_RE.match(ln) for ln in norm_lines):
             if not reformat_as_markdown:
                 return "\n".join(norm_lines), False
+            consumed_prev = "Annual Compounded Rate" in preceding_header
             md_rows = ["| Category | Value |", "| :--- | :---: |"]
             for m in matches_2col:
                 if m is not None:
                     md_rows.append(f"| {m.group('c1').strip()} | {m.group('c2').strip()} |")
-            return "\n".join(md_rows), False
+            return "\n".join(md_rows), consumed_prev
 
     # 3. General multi-row tabular fallback (preserve line breaks rather than mashing into prose)
     if all(len(ln) <= 75 for ln in norm_lines):
@@ -1475,6 +1496,9 @@ def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True
             if consumed_prev and out_paragraphs:
                 if "Overall Annual Return" in out_paragraphs[-1]:
                     out_paragraphs[-1] = "**Overall Annual Return**"
+                elif "Annual Compounded Rate" in out_paragraphs[-1]:
+                    clean_title = out_paragraphs[-1].strip("*").strip()
+                    out_paragraphs[-1] = f"**{clean_title}**"
                 else:
                     out_paragraphs.pop()
             out_paragraphs.append(formatted_table)
@@ -1487,6 +1511,8 @@ def reflow_and_dehyphenate_ocr_text(text: str, reformat_as_markdown: bool = True
             continue
 
         reflowed = re.sub(r"[ \t]+", " ", " ".join(ln.strip() for ln in lines)).strip()
+        if len(reflowed) >= 120 and ". " in reflowed and re.search(r"[a-z]{3},$", reflowed):
+            reflowed = f"{reflowed[:-1]}."
         if reformat_as_markdown and is_footnote_start_line(reflowed) and not reflowed.startswith(">"):
             reflowed = f"> {reflowed}"
         elif reformat_as_markdown and not reflowed.startswith("#") and _is_standalone_heading_block(para):
