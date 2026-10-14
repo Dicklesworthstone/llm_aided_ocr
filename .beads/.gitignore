@@ -55,3 +55,4 @@ redirect
 
 # bv (beads viewer) lock file
 .bv.lock
+.br-wal-index-*/

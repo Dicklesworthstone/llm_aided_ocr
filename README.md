@@ -197,16 +197,28 @@ pip install -r requirements.txt
 # Process a PDF file (default 300 DPI, Markdown output, strip running headers/page numbers)
 python llm-aided-ocr-cli.py 160301289-Warren-Buffett-Katharine-Graham-Letter.pdf
 
-# Process specific page ranges or override provider/model/output directory
-python llm-aided-ocr-cli.py document.pdf --provider openai --model gpt-4o-mini --dpi 300 --max-pages 5 --output-dir ./out
+# Process specific page ranges or override provider/model/output directory/concurrency/chunk size
+python llm-aided-ocr-cli.py document.pdf \
+  --provider openai \
+  --model gpt-4o-mini \
+  --dpi 300 \
+  --max-pages 5 \
+  --chunk-size 6000 \
+  --max-concurrency 4 \
+  --output-dir ./out \
+  --report-json ./out/conservation_report.json
 
-# Process an already-extracted raw OCR text file without re-running Tesseract
-python llm-aided-ocr-cli.py --raw-ocr-input 160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt --output-dir ./out
+# Process an already-extracted raw OCR text file without re-running Tesseract (skipping final LLM quality check)
+python llm-aided-ocr-cli.py \
+  --raw-ocr-input 160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt \
+  --no-quality-check \
+  --output-dir ./out
 
-# Run a standalone deterministic content conservation audit (numeric recall, footnote retention, seam integrity)
+# Run a standalone deterministic content conservation audit and save JSON report
 python llm-aided-ocr-cli.py --verify-only \
   160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt \
-  160301289-Warren-Buffett-Katharine-Graham-Letter_llm_corrected.md
+  160301289-Warren-Buffett-Katharine-Graham-Letter_llm_corrected.md \
+  --report-json ./conservation_report.json
 ```
 
 ### Running `llm_aided_ocr.py` Directly
@@ -223,12 +235,13 @@ python llm-aided-ocr-cli.py --verify-only \
 The LLM-Aided OCR project employs a multi-step process to transform raw OCR output into high-quality, readable text:
 
 1. **PDF Conversion**: Converts input PDF into images at configurable DPI (`PDF_DPI=300` by default) using `pdf2image`.
-2. **Document Image Preprocessing**: Applies grayscale conversion, safe deskewing (`deskew_image`), Contrast-Limited Adaptive Histogram Equalization (CLAHE), Gaussian denoising, and Otsu adaptive binarization before running Tesseract OCR.
+2. **Document Image Preprocessing**: Applies grayscale conversion, rotationally-invariant horizontal line-strip contour median deskewing (`estimate_skew_angle` / `deskew_image`), Contrast-Limited Adaptive Histogram Equalization (CLAHE), Gaussian denoising, and Otsu adaptive binarization before running Tesseract OCR (toggleable via `--no-preprocess`).
 3. **Structural Page Cleaning & Footnote Preservation**: Deterministically strips OCR-mangled standalone page numbers (`-2-`, `-1O-`, `-LL-`, `~Li-`, `~L5-`) and repeating running headers while anchoring bottom-of-page author footnotes (`* ...`, `† ...`, `® ...`) so split sentences across page breaks join cleanly without losing footnotes.
 4. **Lossless Text Chunking**: Splits text into paragraph- and sentence-aligned chunks (`chunk_text` and `split_long_sentence`) with cached offline-safe tokenization (`tiktoken` `cl100k_base` fallback).
 5. **Two-Pass LLM Error Correction & Markdown Formatting**: Each chunk is corrected for OCR typos and formatted as Markdown using read-only `<previous_context>` tags, bounded async concurrency (`MAX_CONCURRENT_REQUESTS`), and exponential backoff retries.
 6. **Deterministic Seam Stitching (`stitch_chunks`)**: Aligns word sequences across chunk boundaries to strip any echoed overlap phrases or spurious mid-sentence heading markers.
-7. **Deterministic Conservation & Quality Assessment**: Evaluates start, middle, and end segments alongside `verify_content_conservation()` (numeric/financial token recall, footnote retention, seam integrity, and word-count conservation).
+7. **Deterministic Conservation & Semantic Similarity Assessment**: Evaluates start, middle, and end segments alongside `verify_content_conservation()` (numeric/financial token recall, footnote retention, seam integrity, word-count conservation, and word/char-3-gram lexical cosine similarity `compute_lexical_similarity()`) plus `compute_embedding_similarity()` via `OPENAI_EMBEDDING_MODEL`.
+
 
 ## Configuration
 

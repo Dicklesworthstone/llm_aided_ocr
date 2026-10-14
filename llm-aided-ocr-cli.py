@@ -68,6 +68,34 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         help="Keep running headers and page numbers in the corrected output",
     )
     parser.add_argument(
+        "--no-preprocess",
+        action="store_true",
+        help="Disable OpenCV image preprocessing (deskewing, CLAHE, denoising, Otsu binarization) before Tesseract OCR",
+    )
+    parser.add_argument(
+        "--no-quality-check",
+        action="store_true",
+        help="Skip the final output quality assessment step",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=8000,
+        help="Target character length per document chunk before LLM processing (default: 8000)",
+    )
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=None,
+        help="Override MAX_CONCURRENT_REQUESTS for parallel chunk processing",
+    )
+    parser.add_argument(
+        "--report-json",
+        dest="report_json",
+        default=None,
+        help="Write the content conservation and quality report as JSON to the specified file path",
+    )
+    parser.add_argument(
         "--verify-only",
         nargs=2,
         metavar=("RAW_OCR_FILE", "PROCESSED_FILE"),
@@ -96,19 +124,30 @@ def apply_runtime_overrides(args: argparse.Namespace) -> None:
         else:
             llm_aided_ocr.OPENAI_COMPLETION_MODEL = args.model
 
+    if getattr(args, "max_concurrency", None) is not None and args.max_concurrency > 0:
+        llm_aided_ocr.MAX_CONCURRENT_REQUESTS = args.max_concurrency
 
-def run_verification_report(raw_path: str, proc_path: str) -> dict[str, object]:
+
+def run_verification_report(raw_path: str, proc_path: str, report_json_path: str | None = None) -> dict[str, object]:
     with open(raw_path, encoding="utf-8") as rf:
         raw_text = rf.read()
     with open(proc_path, encoding="utf-8") as pf:
         proc_text = pf.read()
-    return llm_aided_ocr.verify_content_conservation(raw_text, proc_text)
+    report = llm_aided_ocr.verify_content_conservation(raw_text, proc_text)
+    if report_json_path:
+        llm_aided_ocr._write_json_report(report_json_path, report)
+    return report
 
 
 async def run_pdf_processor(args: argparse.Namespace) -> int:
     if args.verify_only:
         raw_path, proc_path = args.verify_only
-        report = await asyncio.to_thread(run_verification_report, raw_path, proc_path)
+        report = await asyncio.to_thread(
+            run_verification_report,
+            raw_path,
+            proc_path,
+            getattr(args, "report_json", None),
+        )
         print(json.dumps(report, indent=2))
         return 0
 
@@ -122,6 +161,10 @@ async def run_pdf_processor(args: argparse.Namespace) -> int:
         output_dir=args.output_dir,
         raw_ocr_input_path=args.raw_ocr_input,
         dpi=args.dpi,
+        preprocess=not getattr(args, "no_preprocess", False),
+        assess_quality=not getattr(args, "no_quality_check", False),
+        chunk_size=getattr(args, "chunk_size", 8000),
+        report_json_path=getattr(args, "report_json", None),
     )
     return 0
 
@@ -129,3 +172,4 @@ async def run_pdf_processor(args: argparse.Namespace) -> int:
 if __name__ == "__main__":
     cli_args = parse_arguments()
     sys.exit(asyncio.run(run_pdf_processor(cli_args)))
+

@@ -310,7 +310,7 @@ def test_b7_and_b8_buffett_flagship_sample_conservation():
 
     assert report["footnote_count"] == 7
     assert report["footnotes_preserved"] == 7
-    assert report["footnote_recall"] == 1.0
+    assert abs(report["footnote_recall"] - 1.0) < 1e-6
     assert report["missing_footnotes"] == []
     assert report["seam_anomalies"] == []
     assert report["numeric_recall"] >= 0.95
@@ -355,7 +355,7 @@ async def test_b9_cli_end_to_end_raw_ocr_and_verify_only(tmp_path, capsys):
         captured = json.loads(capsys.readouterr().out)
     except json.JSONDecodeError as exc:
         pytest.fail(f"CLI --verify-only did not output valid JSON: {exc}")
-    assert captured["footnote_recall"] == 1.0
+    assert abs(captured["footnote_recall"] - 1.0) < 1e-6
     assert captured["seam_anomalies"] == []
 
     # 2. Test --raw-ocr-input mode with mocked LLM completion writing to tmp_path
@@ -399,3 +399,119 @@ async def test_b9_cli_end_to_end_raw_ocr_and_verify_only(tmp_path, capsys):
     assert "~2-" not in out_text
     assert "$50,000" in out_text
     assert "Substantive footnote explaining the 15% return assumption" in out_text
+
+
+def test_b11_line_strip_deskew_preserves_upright_indented_pages_and_corrects_skew():
+    # Page 10 and Page 14 of the Buffett PDF have indented numbered lists/paragraphs that previously
+    # caused global cv2.minAreaRect(coords) to falsely tilt upright pages by 6-12 degrees.
+    page10 = llm_aided_ocr.convert_pdf_to_images(str(SAMPLE_PDF_PATH), max_pages=1, skip_first_n_pages=9, dpi=300)[0]
+    page14 = llm_aided_ocr.convert_pdf_to_images(str(SAMPLE_PDF_PATH), max_pages=1, skip_first_n_pages=13, dpi=300)[0]
+
+    gray10 = np.array(page10.convert("L"))
+    gray14 = np.array(page14.convert("L"))
+
+    assert abs(llm_aided_ocr.estimate_skew_angle(gray10)) < 1e-6
+    assert abs(llm_aided_ocr.estimate_skew_angle(gray14)) < 1e-6
+
+    ocr10 = llm_aided_ocr.ocr_image(page10, preprocess=True)
+    ocr14 = llm_aided_ocr.ocr_image(page14, preprocess=True)
+    assert "movement of the tides" in ocr10
+    assert "comfort level produced by this option" in ocr14.lower()
+
+    # Now synthetically rotate Page 14 counter-clockwise by +3.5 degrees and verify deskew recovery
+    h, w = gray14.shape[:2]
+    rot_mat = cv2.getRotationMatrix2D((w // 2, h // 2), 3.5, 1.0)
+    skewed14 = cv2.warpAffine(gray14, rot_mat, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    est_skew = llm_aided_ocr.estimate_skew_angle(skewed14)
+    assert -4.2 <= est_skew <= -2.8
+    deskewed14 = llm_aided_ocr.deskew_image(skewed14)
+    assert abs(llm_aided_ocr.estimate_skew_angle(deskewed14)) < 1e-6
+
+
+@pytest.mark.asyncio
+async def test_b12_lexical_and_embedding_similarity_and_conservation_metrics():
+    assert abs(llm_aided_ocr.compute_lexical_similarity("identical text sample", "identical text sample") - 1.0) < 1e-6
+    assert llm_aided_ocr.compute_lexical_similarity("alpha beta gamma", "xyz uvw rst") < 0.15
+
+    raw_text = await asyncio.to_thread(RAW_OCR_PATH.read_text, encoding="utf-8")
+    proc_text = await asyncio.to_thread(CORRECTED_MD_PATH.read_text, encoding="utf-8")
+    conservation = llm_aided_ocr.verify_content_conservation(raw_text, proc_text)
+    assert "lexical_cosine_similarity" in conservation
+    assert conservation["lexical_cosine_similarity"] >= 0.94
+
+    # Test offline fallback of compute_embedding_similarity when get_openai_client() is None
+    with patch.object(llm_aided_ocr, "get_openai_client", return_value=None):
+        sim_offline = await llm_aided_ocr.compute_embedding_similarity(raw_text, proc_text)
+        assert sim_offline >= 0.94
+
+    # Test online path of compute_embedding_similarity with mocked OpenAI embeddings response
+    class _FakeEmbeddingItem:
+        def __init__(self, vec: list[float]):
+            self.embedding = vec
+
+    class _FakeEmbeddingResponse:
+        def __init__(self):
+            self.data = [_FakeEmbeddingItem([1.0, 0.0, 0.0]), _FakeEmbeddingItem([0.8, 0.6, 0.0])]
+
+    class _FakeEmbeddingsAPI:
+        async def create(self, model: str, input: list[str]):
+            assert model == llm_aided_ocr.OPENAI_EMBEDDING_MODEL
+            assert len(input) == 2
+            return _FakeEmbeddingResponse()
+
+    class _FakeOpenAIClient:
+        def __init__(self):
+            self.embeddings = _FakeEmbeddingsAPI()
+
+    with patch.object(llm_aided_ocr, "get_openai_client", return_value=_FakeOpenAIClient()):
+        sim_online = await llm_aided_ocr.compute_embedding_similarity("first text", "second text")
+        assert abs(sim_online - 0.8) < 1e-6
+
+
+def test_b13_buffett_sample_markdown_tables_and_heading_hierarchy():
+    md_text = CORRECTED_MD_PATH.read_text(encoding="utf-8")
+    assert "## Act One - The Awakening" in md_text
+    assert "## Act Two - The Great Leap" in md_text
+    assert "| Period | S & P 500 | Becker Median Result* |" in md_text
+    assert "| Last 3 market cycles, (6/30/62 to 12/31/74) | 5.3% | 4.1% |" in md_text
+    assert "| Benchmark / Manager | Annual Compounded Rate of Return (including Dividends) |" in md_text
+    assert "| Morgan Guaranty | +3.4% |" in md_text
+    assert "## A fixed income (bonds) investment strategy" not in md_text
+    assert "## My final option" not in md_text
+
+
+@pytest.mark.asyncio
+async def test_b14_extended_cli_flags_and_json_report_export(tmp_path):
+    cli = _load_cli_module()
+    report_path = tmp_path / "verify_report.json"
+
+    verify_args = cli.parse_arguments(
+        [
+            "--verify-only",
+            str(RAW_OCR_PATH),
+            str(CORRECTED_MD_PATH),
+            "--report-json",
+            str(report_path),
+            "--max-concurrency",
+            "6",
+            "--chunk-size",
+            "6000",
+            "--no-preprocess",
+            "--no-quality-check",
+        ]
+    )
+    cli.apply_runtime_overrides(verify_args)
+    assert llm_aided_ocr.MAX_CONCURRENT_REQUESTS == 6
+
+    rc = await cli.run_pdf_processor(verify_args)
+    assert rc == 0
+    assert report_path.exists()
+    raw_json = await asyncio.to_thread(report_path.read_text, encoding="utf-8")
+    try:
+        report_data = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        pytest.fail(f"Report JSON is invalid: {exc}")
+    assert abs(report_data["footnote_recall"] - 1.0) < 1e-6
+    assert report_data["lexical_cosine_similarity"] >= 0.94
+    assert report_data["deterministic_score"] >= 95
+

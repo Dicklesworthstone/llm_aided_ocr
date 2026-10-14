@@ -63,7 +63,9 @@ Once having committed to provide pensions, how do we pay? The Law and prudent bu
 
 Because a business corporation, unlike the Federal government, has to create a *"savings account"*—an investment accumulating and investment management operation of some sort—to properly fund its pension plan, it must make investment management decisions with respect to pension plan assets.
 
-# The History of Corporate Pension Plan Management Act One - The Awakening
+# The History of Corporate Pension Plan Management
+
+## Act One - The Awakening
 
 A few decades ago pensions were a relatively new thing at most companies, so that the *"savings accounts"* were in their formative stages and therefore much smaller. Furthermore, promises were fractions of those presently made, so that the amount eventually required in the savings account to purchase the required annuity at retirement was correspondingly smaller.
 
@@ -87,8 +89,6 @@ So, while U. S. Steel had a visible $3.6 billion in net operating assets which m
 
 4. Many managements thus saw their largest division earning dismal rates of return with substantial market value shrinkage in the bond component, while all around them high returns were being realized from stocks with little apparent effort or talent. If a company had $100 million invested in its engine division earning 12% by managerial zeal and ingenuity, why tolerate $100 million in its pension fund "division" poking along at only 4% because of inattention - particularly when increasing the $4 million to some larger figure would have the same impact in future earnings for owners as raising margins on engines. Intensive effort on production, research and sales might only produce an increase from 12% to 13% in the engine area, since decisions already had been so near to optimal, but it was easy to imagine 4% becoming 10% in the pension fund area if just average results were attained in equity investment. And, of course, who would settle for being just average?
 
-# The History of Corporate Pension Plan Management
-
 ## Act Two - The Great Leap
 
 And so the hunt was on. Wall Street abhors a commercial vacuum. If the will to believe stirs within the customer, the merchandise will be supplied - without warranty. When franchise companies are wanted by investors, franchise companies will be found - and recommended by the underwriters. If there are none to be found, they will be created. Similarly, if above-average investment performance is sought, it will be promised in abundance - and at least the illusion will be produced.
@@ -109,21 +109,13 @@ In any event, a 25% turnover rate among professionals as a group, with 2% costs 
 
 For the reasons set forth above, almost all recent investment management performance by pension funds of large corporations has been fair to poor. Specifically, the Becker study (most comprehensive of all pension investment measuring services) reports the following:
 
-**Overall Annual Return**  
-**Becker Median**  
-**S & P 500 Result***
+**Overall Annual Return**
 
-Last 3 market cycles, (6/30/62 to 12/31/74)  
-5.3%  
-4.1%  
-
-Last 2 market cycles, (9/30/66 to 12/31/74)  
-2.1%  
-0.4%  
-
-Last single market cycle, (6/30/70 to 12/31/74)  
-2.2%  
-(0.3%)  
+| Period | S & P 500 | Becker Median Result* |
+|--------|-----------|-----------------------|
+| Last 3 market cycles, (6/30/62 to 12/31/74) | 5.3% | 4.1% |
+| Last 2 market cycles, (9/30/66 to 12/31/74) | 2.1% | 0.4% |
+| Last single market cycle, (6/30/70 to 12/31/74) | 2.2% | (0.3%) |
 
 *Excludes bond segment of portfolios so that equity management only is measured against the equity yardstick.
 
@@ -149,13 +141,13 @@ In short, the rational expectation of assuring above-average pension fund manage
 
 I recently received some interesting figures from a pension fund involving about $250 million of assets. The 9-1/2 year record through June 30, 1975 of the three major banks involved (managing $20 - $50 million per bank) follows, compared to "average" as defined in two ways, the S & P 500 and the D-J Industrials:
 
-**Annual Compounded Rate of Return (including Dividends)**
-
-- Dow-Jones Industrials +2.8%  
-- S & P 500 +3.8%  
-- Continental Illinois +1.8%  
-- First National City +1.0%  
-- Morgan Guaranty +3.4%  
+| Benchmark / Manager | Annual Compounded Rate of Return (including Dividends) |
+|---------------------|--------------------------------------------------------|
+| Dow-Jones Industrials | +2.8% |
+| S & P 500 | +3.8% |
+| Continental Illinois | +1.8% |
+| First National City | +1.0% |
+| Morgan Guaranty | +3.4% |
 
 Until recently, Chase had managed a comparable segment of the funds but was terminated because of poor performance - probably worse than the other banks shown above. Each percentage point plus or minus affected this fund by about $2 to $4 million over the time period measured.
 
@@ -191,13 +183,9 @@ Many pension funds, including the fund to which I referred earlier, have attempt
 
 The reason isn't too hard to see (particularly with a rear view mirror). Much of Wall Street is a succession of fashions. Obviously some individuals will have hit the most recent fashion, and their record will look correspondingly good - maybe sensationally good if they have a reckless streak and have played a particular trend very hard. But fashion-hitting never has been successfully maintained, to my knowledge. And the manager primarily selected for recent hot performance knows what he is expected to do. He is to perform - and quickly. So the new small manager's decisions frequently are characterized by high turnover, major mistakes, even more furious activity to catch up, etc. It has not happened every time, but my hunch is that the sum total performance of the relatively unknown go-go managers for pension funds has been worse than the lumbering, stiff-legged minuet performed by the major banks.
 
-## A fixed income (bonds) investment strategy
-
 4. A fixed income (bonds) investment strategy can be followed, which presently allows returns of about 9% per annum that can be locked in for some time. This option currently is becoming somewhat more popular, should be quite defensible under ERISA, and will look good or bad, depending upon what returns from equity holdings develop over the next decade or two. This essentially is the same decision that was made by default several decades ago by many companies, except the rates then were 4% instead of 9%. I do not recommend an attempt by us to go back and forth from bonds to stocks. This is a skill possessed by few, if any - and certainly not by a group. If we could master this particular form of alchemy, there would be little reason to do anything else.
 
 The comfort level produced by this option is likely to be high under any conditions except high rates of inflation - which will produce distress under all of the options discussed herein.
-
-## My final option
 
 5. My final option - and the one to which I lean, although not at anything like a 45-degree angle - is mildly unconventional, thereby causing somewhat more legal risk for directors.* It may differ from other common stock programs, more in attitude than in appearance, or even results. It involves treating portfolio management decisions much like business acquisition decisions by corporate managers.
 

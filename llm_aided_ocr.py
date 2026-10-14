@@ -808,24 +808,71 @@ async def generate_completion_from_local_llm(
 
 
 # Image Processing Functions
-def deskew_image(gray: np.ndarray, max_angle: float = 15.0) -> np.ndarray:
-    """Estimate document skew angle from foreground text pixels and deskew if within [-max_angle, max_angle]."""
+def estimate_skew_angle(
+    gray: np.ndarray,
+    max_angle: float = 15.0,
+    min_angle: float = 0.75,
+) -> float:
+    """Estimate document skew angle (in degrees) from horizontal text line-strip contours."""
+    if gray.ndim != 2 or gray.size == 0:
+        return 0.0
+    height, width = gray.shape[:2]
+    _, inv = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    kernel_w = max(15, width // 50)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_w, 3))
+    dilated = cv2.dilate(inv, kernel, iterations=1)
+    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    angles: list[float] = []
+    min_len = max(50.0, width / 12.0)
+    max_thick = max(40.0, height / 18.0)
+
+    for cnt in contours:
+        if cnt.shape[0] < 4:
+            continue
+        _, _, w, _ = cv2.boundingRect(cnt)
+        if w < min_len:
+            continue
+        vx, vy, x0, y0 = cv2.fitLine(cnt, cv2.DIST_L2, 0, 0.01, 0.01)
+        vx_f, vy_f = float(vx[0]), float(vy[0])
+        x0_f, y0_f = float(x0[0]), float(y0[0])
+        if vx_f < 0:
+            vx_f, vy_f = -vx_f, -vy_f
+        ang = float(np.degrees(np.arctan2(vy_f, vx_f)))
+        if abs(ang) > max_angle:
+            continue
+        pts = cnt.reshape(-1, 2).astype(np.float32)
+        dx = pts[:, 0] - x0_f
+        dy = pts[:, 1] - y0_f
+        proj_along = dx * vx_f + dy * vy_f
+        proj_perp = -dx * vy_f + dy * vx_f
+        line_len = float(proj_along.max() - proj_along.min())
+        line_thick = float(proj_perp.max() - proj_perp.min())
+        if line_len >= min_len and 4.0 <= line_thick <= max_thick and (line_len / max(1.0, line_thick)) >= 3.0:
+            angles.append(ang)
+
+    if len(angles) < 4:
+        return 0.0
+
+    arr = np.array(angles, dtype=np.float64)
+    q25, q75 = np.percentile(arr, [25, 75])
+    iqr = float(q75 - q25)
+    median_angle = float(np.median(arr))
+    if iqr > 2.5 or abs(median_angle) < min_angle or abs(median_angle) > max_angle:
+        return 0.0
+    return median_angle
+
+
+def deskew_image(
+    gray: np.ndarray,
+    max_angle: float = 15.0,
+    min_angle: float = 0.75,
+) -> np.ndarray:
+    """Deskew a grayscale document page using horizontal line-strip median angle estimation."""
     if gray.ndim != 2 or gray.size == 0:
         return gray
-    _, inv = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
-    coords = np.column_stack(np.where(inv > 0))
-    if coords.shape[0] < 100:
-        return gray
-
-    rect = cv2.minAreaRect(coords.astype(np.float32))
-    angle = float(rect[-1])
-    # Normalize OpenCV minAreaRect angle to [-45, 45]
-    if angle < -45.0:
-        angle = 90.0 + angle
-    elif angle > 45.0:
-        angle = angle - 90.0
-
-    if abs(angle) < 0.15 or abs(angle) > max_angle:
+    angle = estimate_skew_angle(gray, max_angle=max_angle, min_angle=min_angle)
+    if abs(angle) < 1e-6:
         return gray
 
     height, width = gray.shape[:2]
@@ -838,6 +885,7 @@ def deskew_image(gray: np.ndarray, max_angle: float = 15.0) -> np.ndarray:
         flags=cv2.INTER_CUBIC,
         borderMode=cv2.BORDER_REPLICATE,
     )
+
 
 
 def preprocess_image(
@@ -899,9 +947,10 @@ def convert_pdf_to_images(
     return images
 
 
-def ocr_image(image: Image.Image) -> str:
-    preprocessed_image = preprocess_image(image)
-    return pytesseract.image_to_string(preprocessed_image)
+def ocr_image(image: Image.Image, preprocess: bool = True) -> str:
+    target_image = preprocess_image(image) if preprocess else image
+    return pytesseract.image_to_string(target_image)
+
 
 
 # Structural Page Header/Page-Number Cleaning & Footnote Preservation
@@ -1320,6 +1369,7 @@ async def process_document(
     list_of_extracted_text_strings: list[str],
     reformat_as_markdown: bool = True,
     suppress_headers_and_page_numbers: bool = True,
+    chunk_size: int = 8000,
 ) -> str:
     logger.info("Starting document processing. Total pages: %d", len(list_of_extracted_text_strings))
     cleaned_pages = clean_page_artifacts(
@@ -1328,7 +1378,8 @@ async def process_document(
     )
     full_text = "\n\n".join(cleaned_pages)
     logger.info("Size of full text before processing: %d characters", len(full_text))
-    chunk_size = 8000
+    chunk_size = max(500, chunk_size)
+
 
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", full_text) if p.strip()]
     chunks: list[str] = []
@@ -1402,8 +1453,73 @@ def _extract_significant_numbers(text: str) -> set[str]:
     return conserved
 
 
+def _counter_cosine_similarity(c1: Counter[str], c2: Counter[str]) -> float:
+    """Compute cosine similarity between two frequency Counters."""
+    if not c1 or not c2:
+        return 0.0
+    common_keys = set(c1.keys()) & set(c2.keys())
+    dot = float(sum(c1[k] * c2[k] for k in common_keys))
+    norm1 = float(np.sqrt(sum(v * v for v in c1.values())))
+    norm2 = float(np.sqrt(sum(v * v for v in c2.values())))
+    if norm1 <= 0.0 or norm2 <= 0.0:
+        return 0.0
+    return max(0.0, min(1.0, dot / (norm1 * norm2)))
+
+
+def compute_lexical_similarity(original_text: str, processed_text: str) -> float:
+    """Compute deterministic lexical cosine similarity (word frequency + character 3-gram frequency)."""
+    if not original_text.strip() and not processed_text.strip():
+        return 1.0
+    if not original_text.strip() or not processed_text.strip():
+        return 0.0
+
+    orig_words = Counter(re.findall(r"[a-z0-9]{2,}", original_text.lower()))
+    proc_words = Counter(re.findall(r"[a-z0-9]{2,}", processed_text.lower()))
+    word_sim = _counter_cosine_similarity(orig_words, proc_words)
+
+    orig_norm = re.sub(r"[^a-z0-9]+", " ", original_text.lower()).strip()
+    proc_norm = re.sub(r"[^a-z0-9]+", " ", processed_text.lower()).strip()
+    orig_trigrams = Counter(orig_norm[i : i + 3] for i in range(max(0, len(orig_norm) - 2)))
+    proc_trigrams = Counter(proc_norm[i : i + 3] for i in range(max(0, len(proc_norm) - 2)))
+    trigram_sim = _counter_cosine_similarity(orig_trigrams, proc_trigrams)
+
+    return round(0.6 * word_sim + 0.4 * trigram_sim, 4)
+
+
+async def compute_embedding_similarity(
+    original_text: str,
+    processed_text: str,
+    model: str | None = None,
+) -> float:
+    """Compute semantic embedding cosine similarity via OPENAI_EMBEDDING_MODEL, falling back to lexical similarity offline."""
+    client = get_openai_client()
+    if client is None:
+        return compute_lexical_similarity(original_text, processed_text)
+
+    embed_model = model or OPENAI_EMBEDDING_MODEL
+    orig_sample = _sample_start_mid_end(original_text, 12000)
+    proc_sample = _sample_start_mid_end(processed_text, 12000)
+    if not orig_sample.strip() or not proc_sample.strip():
+        return compute_lexical_similarity(original_text, processed_text)
+
+    try:
+        resp = await client.embeddings.create(
+            model=embed_model,
+            input=[orig_sample, proc_sample],
+        )
+        v1 = np.array(resp.data[0].embedding, dtype=np.float64)
+        v2 = np.array(resp.data[1].embedding, dtype=np.float64)
+        denom = float(np.linalg.norm(v1) * np.linalg.norm(v2))
+        if denom <= 0.0:
+            return compute_lexical_similarity(original_text, processed_text)
+        return round(float(max(0.0, min(1.0, float(np.dot(v1, v2)) / denom))), 4)
+    except Exception as e:
+        logger.debug("Embedding similarity API fallback to lexical similarity: %s", e)
+        return compute_lexical_similarity(original_text, processed_text)
+
+
 def verify_content_conservation(original_text: str, processed_text: str) -> dict[str, Any]:
-    """Deterministically verify conservation of numeric facts, footnotes, seam integrity, and document length."""
+    """Deterministically verify conservation of numeric facts, footnotes, seam integrity, lexical similarity, and length."""
     cleaned_raw = clean_raw_ocr_text(original_text, suppress_headers_and_page_numbers=True)
     raw_numbers = _extract_significant_numbers(cleaned_raw)
     proc_numbers = _extract_significant_numbers(processed_text)
@@ -1416,14 +1532,13 @@ def verify_content_conservation(original_text: str, processed_text: str) -> dict
         missing_numbers = []
         numeric_recall = 1.0
 
-    # Footnote conservation: check whether distinct 5-word signature phrases from raw footnotes appear in processed_text
+    # Footnote conservation: check whether distinct content words from raw footnotes appear in processed_text
     raw_footnotes = extract_footnotes(original_text)
     proc_lower = re.sub(r"\s+", " ", processed_text.lower())
     preserved_footnotes = 0
     missing_footnotes: list[str] = []
     for fn in raw_footnotes:
         words = re.findall(r"[a-z]{3,}", fn.lower())
-        # Check if at least 60% of the content words in the footnote appear in processed_text
         if not words:
             preserved_footnotes += 1
             continue
@@ -1445,6 +1560,7 @@ def verify_content_conservation(original_text: str, processed_text: str) -> dict
     raw_word_count = max(1, len(cleaned_raw.split()))
     proc_word_count = len(processed_text.split())
     word_retention_ratio = proc_word_count / raw_word_count
+    lexical_sim = compute_lexical_similarity(cleaned_raw, processed_text)
 
     # Compute deterministic 0-100 conservation score
     length_score = 1.0 if 0.75 <= word_retention_ratio <= 1.25 else max(0.0, 1.0 - abs(1.0 - word_retention_ratio))
@@ -1455,7 +1571,14 @@ def verify_content_conservation(original_text: str, processed_text: str) -> dict
                 0.0,
                 min(
                     100.0,
-                    100.0 * (0.45 * numeric_recall + 0.30 * footnote_recall + 0.25 * length_score - seam_penalty),
+                    100.0
+                    * (
+                        0.40 * numeric_recall
+                        + 0.25 * footnote_recall
+                        + 0.20 * lexical_sim
+                        + 0.15 * length_score
+                        - seam_penalty
+                    ),
                 ),
             )
         )
@@ -1470,6 +1593,7 @@ def verify_content_conservation(original_text: str, processed_text: str) -> dict
         "missing_footnotes": missing_footnotes,
         "seam_anomalies": seam_anomalies,
         "word_retention_ratio": round(word_retention_ratio, 4),
+        "lexical_cosine_similarity": round(lexical_sim, 4),
         "deterministic_score": deterministic_score,
     }
 
@@ -1491,6 +1615,7 @@ async def assess_output_quality(original_text: str, processed_text: str) -> tupl
     available_chars_per_text = max_chars // 2
 
     conservation = verify_content_conservation(original_text, processed_text)
+    semantic_similarity = await compute_embedding_similarity(original_text, processed_text)
     original_sample = _sample_start_mid_end(original_text, available_chars_per_text)
     processed_sample = _sample_start_mid_end(processed_text, available_chars_per_text)
 
@@ -1504,6 +1629,8 @@ async def assess_output_quality(original_text: str, processed_text: str) -> tupl
 Deterministic conservation metrics across the full document:
 - Numeric recall: {conservation['numeric_recall']:.1%}
 - Footnote recall: {conservation['footnote_recall']:.1%} ({conservation['footnotes_preserved']}/{conservation['footnote_count']})
+- Lexical cosine similarity: {conservation['lexical_cosine_similarity']:.1%}
+- Semantic/embedding similarity: {semantic_similarity:.1%}
 - Seam anomalies detected: {len(conservation['seam_anomalies'])}
 - Word retention ratio: {conservation['word_retention_ratio']:.2f}
 
@@ -1535,6 +1662,7 @@ EXPLANATION: [Your explanation]
             f"Deterministic conservation audit: numeric_recall={conservation['numeric_recall']:.1%}, "
             f"footnote_recall={conservation['footnote_recall']:.1%} "
             f"({conservation['footnotes_preserved']}/{conservation['footnote_count']}), "
+            f"lexical_similarity={conservation['lexical_cosine_similarity']:.1%}, "
             f"seam_anomalies={len(conservation['seam_anomalies'])}, "
             f"word_retention_ratio={conservation['word_retention_ratio']:.2f}."
         )
@@ -1557,6 +1685,14 @@ EXPLANATION: [Your explanation]
         return None, None
 
 
+def _write_json_report(report_path: str, payload: dict[str, Any]) -> None:
+    report_dir = os.path.dirname(os.path.abspath(report_path))
+    if report_dir:
+        os.makedirs(report_dir, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as rf:
+        json.dump(payload, rf, indent=2)
+
+
 async def main(
     input_pdf_file_path: str = "160301289-Warren-Buffett-Katharine-Graham-Letter.pdf",
     max_test_pages: int = 0,
@@ -1566,6 +1702,10 @@ async def main(
     output_dir: str | None = None,
     raw_ocr_input_path: str | None = None,
     dpi: int = PDF_DPI,
+    preprocess: bool = True,
+    assess_quality: bool = True,
+    chunk_size: int = 8000,
+    report_json_path: str | None = None,
 ):
     try:
         # Suppress HTTP request logs
@@ -1607,9 +1747,10 @@ async def main(
                 dpi=dpi,
             )
             logger.info("Tesseract version: %s", pytesseract.get_tesseract_version())
-            logger.info("Extracting text from converted pages...")
+            logger.info("Extracting text from converted pages (preprocess=%s)...", preprocess)
+            ocr_fn = functools.partial(ocr_image, preprocess=preprocess)
             with ThreadPoolExecutor() as executor:
-                list_of_extracted_text_strings = list(executor.map(ocr_image, list_of_scanned_images))
+                list_of_extracted_text_strings = list(executor.map(ocr_fn, list_of_scanned_images))
             logger.info("Done extracting text from converted pages.")
             raw_ocr_output = "\n".join(list_of_extracted_text_strings)
             with open(raw_ocr_output_file_path, "w", encoding="utf-8") as f:
@@ -1621,6 +1762,7 @@ async def main(
             list_of_extracted_text_strings,
             reformat_as_markdown,
             suppress_headers_and_page_numbers,
+            chunk_size=chunk_size,
         )
         cleaned_text = remove_corrected_text_header(final_text)
 
@@ -1639,13 +1781,23 @@ async def main(
         logger.info(" Raw OCR: %s", raw_ocr_output_file_path)
         logger.info(" LLM Corrected: %s", llm_corrected_output_file_path)
 
-        # Perform a final quality check
-        quality_score, explanation = await assess_output_quality(raw_ocr_output, cleaned_text)
-        if quality_score is not None:
-            logger.info("Final quality score: %d/100", quality_score)
-            logger.info("Explanation: %s", explanation)
-        else:
-            logger.warning("Unable to determine final quality score.")
+        quality_score: int | None = None
+        explanation: str | None = None
+        if assess_quality:
+            quality_score, explanation = await assess_output_quality(raw_ocr_output, cleaned_text)
+            if quality_score is not None:
+                logger.info("Final quality score: %d/100", quality_score)
+                logger.info("Explanation: %s", explanation)
+            else:
+                logger.warning("Unable to determine final quality score.")
+
+        if report_json_path:
+            report = verify_content_conservation(raw_ocr_output, cleaned_text)
+            report["quality_score"] = quality_score
+            report["quality_explanation"] = explanation
+            await asyncio.to_thread(_write_json_report, report_json_path, report)
+            logger.info("Conservation and quality report written to: %s", report_json_path)
+
         return cleaned_text
     except Exception as e:
         logger.error("An error occurred in the main function: %s", e)
@@ -1655,3 +1807,4 @@ async def main(
 
 if __name__ == "__main__":
     asyncio.run(main())
+
